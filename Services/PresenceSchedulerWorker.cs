@@ -27,7 +27,7 @@ public class PresenceSchedulerWorker : BackgroundService
 
                     // 1. Process scheduled online changes
                     var onlineRows = await db.ExecuteAsync(
-                        "UPDATE host_presence SET status = 'online', schedule_online_at = NULL, updated_at = now() WHERE schedule_online_at IS NOT NULL AND schedule_online_at <= now()");
+                        "UPDATE user_presence SET status = 'online', schedule_online_at = NULL, updated_at = now() WHERE schedule_online_at IS NOT NULL AND schedule_online_at <= now()");
                     if (onlineRows > 0)
                     {
                         _logger.LogInformation("Presence Scheduler: Toggled {Count} hosts to ONLINE.", onlineRows);
@@ -35,7 +35,7 @@ public class PresenceSchedulerWorker : BackgroundService
 
                     // 2. Process scheduled offline changes
                     var offlineRows = await db.ExecuteAsync(
-                        "UPDATE host_presence SET status = 'offline', schedule_offline_at = NULL, updated_at = now() WHERE schedule_offline_at IS NOT NULL AND schedule_offline_at <= now()");
+                        "UPDATE user_presence SET status = 'offline', schedule_offline_at = NULL, updated_at = now() WHERE schedule_offline_at IS NOT NULL AND schedule_offline_at <= now()");
                     if (offlineRows > 0)
                     {
                         _logger.LogInformation("Presence Scheduler: Toggled {Count} hosts to OFFLINE.", offlineRows);

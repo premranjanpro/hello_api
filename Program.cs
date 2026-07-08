@@ -1,5 +1,6 @@
 using System.Data;
 using System.Text;
+using Dapper;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
@@ -54,6 +55,12 @@ app.UseSwagger();
 app.UseSwaggerUI();
 app.UseAuthentication();
 app.UseAuthorization();
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<IDbConnection>();
+    db.Execute("UPDATE user_presence SET status = 'offline' WHERE status = 'online'");
+}
 
 app.MapGet("/", () => Results.Ok(new { app = "Hello24", status = "running" }));
 app.MapHub<CallHub>("/hubs/calls");

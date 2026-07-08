@@ -16,7 +16,7 @@ public static class CallEndpoints
         app.MapPost("/api/calls/start", async (StartCallDto dto, ClaimsPrincipal cp, IDbConnection db, LiveKitTokenService livekit, CallNotifier notifier, IHubContext<CallHub> hubContext) =>
         {
             var callerId = CurrentUser.Id(cp);
-            var host = await db.QueryFirstOrDefaultAsync<dynamic>("SELECT hp.*,u.username,u.status AS user_status,COALESCE(p.status,'offline') AS presence FROM host_profile hp JOIN app_user u ON u.id=hp.user_id LEFT JOIN host_presence p ON p.user_id=u.id WHERE hp.user_id=@HostUserId AND hp.status='approved'", new { dto.HostUserId });
+            var host = await db.QueryFirstOrDefaultAsync<dynamic>("SELECT hp.*,u.username,u.status AS user_status,COALESCE(p.status,'offline') AS presence FROM host_profile hp JOIN app_user u ON u.id=hp.user_id LEFT JOIN user_presence p ON p.user_id=u.id WHERE hp.user_id=@HostUserId AND hp.status='approved'", new { dto.HostUserId });
             if (host == null || host.user_status != "active" || host.presence != "online") return Results.BadRequest("Host not available");
             var blocked = await db.ExecuteScalarAsync<bool>("SELECT EXISTS(SELECT 1 FROM block_list WHERE (blocker_user_id=@callerId AND blocked_user_id=@HostUserId) OR (blocker_user_id=@HostUserId AND blocked_user_id=@callerId))", new { callerId, dto.HostUserId });
             if (blocked) return Results.BadRequest("User blocked");
@@ -31,8 +31,8 @@ public static class CallEndpoints
             var latestToken = await db.ExecuteScalarAsync<string?>("SELECT fcm_token FROM user_device WHERE user_id=@HostUserId ORDER BY last_seen_at DESC LIMIT 1", new { dto.HostUserId });
             var callerUsername = await db.ExecuteScalarAsync<string?>("SELECT COALESCE(username, phone) FROM app_user WHERE id=@callerId", new { callerId });
             await notifier.NotifyIncomingCallAsync(db, dto.HostUserId, callId, callerUsername ?? "Caller", latestToken);
-            await db.ExecuteAsync("INSERT INTO host_presence(user_id, status, last_seen_at, updated_at) VALUES(@callerId, 'busy', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='busy', last_seen_at=now(), updated_at=now()", new { callerId });
-            await db.ExecuteAsync("INSERT INTO host_presence(user_id, status, last_seen_at, updated_at) VALUES(@HostUserId, 'busy', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='busy', last_seen_at=now(), updated_at=now()", new { dto.HostUserId });
+            await db.ExecuteAsync("INSERT INTO user_presence(user_id, status, last_seen_at, updated_at) VALUES(@callerId, 'busy', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='busy', last_seen_at=now(), updated_at=now()", new { callerId });
+            await db.ExecuteAsync("INSERT INTO user_presence(user_id, status, last_seen_at, updated_at) VALUES(@HostUserId, 'busy', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='busy', last_seen_at=now(), updated_at=now()", new { dto.HostUserId });
             await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = callerId.ToString(), status = "busy" });
             await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = dto.HostUserId.ToString(), status = "busy" });
 
@@ -77,8 +77,8 @@ public static class CallEndpoints
             await db.ExecuteAsync("INSERT INTO wallet_transaction(user_id,txn_type,amount,reference_type,reference_id,note) VALUES(@Caller,'call_charge',-@amount,'call',@callId,'Voice call charge')", new { Caller = (Guid)call.caller_user_id, amount, callId });
             await db.ExecuteAsync("INSERT INTO host_earning_ledger(host_user_id,call_session_id,txn_type,amount,note) VALUES(@Host,@callId,'earning',@hostEarn,'Call earning')", new { Host = (Guid)call.host_user_id, callId, hostEarn });
             await db.ExecuteAsync("UPDATE host_profile SET completed_calls=completed_calls+1 WHERE user_id=@Host", new { Host = (Guid)call.host_user_id });
-            await db.ExecuteAsync("UPDATE host_presence SET status='online',updated_at=now() WHERE user_id=@Host", new { Host = (Guid)call.host_user_id });
-            await db.ExecuteAsync("INSERT INTO host_presence(user_id, status, last_seen_at, updated_at) VALUES(@Caller, 'online', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='online', last_seen_at=now(), updated_at=now()", new { Caller = (Guid)call.caller_user_id });
+            await db.ExecuteAsync("UPDATE user_presence SET status='online',updated_at=now() WHERE user_id=@Host", new { Host = (Guid)call.host_user_id });
+            await db.ExecuteAsync("INSERT INTO user_presence(user_id, status, last_seen_at, updated_at) VALUES(@Caller, 'online', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='online', last_seen_at=now(), updated_at=now()", new { Caller = (Guid)call.caller_user_id });
             await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = call.host_user_id.ToString(), status = "online" });
             await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = call.caller_user_id.ToString(), status = "online" });
             await db.ExecuteAsync("INSERT INTO call_event(call_session_id,event_type,metadata) VALUES(@callId,'ended',jsonb_build_object('seconds',@seconds,'amount',@amount))", new { callId, seconds, amount });

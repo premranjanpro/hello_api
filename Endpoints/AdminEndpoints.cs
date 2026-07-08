@@ -17,19 +17,19 @@ public static class AdminEndpoints
 
         app.MapGet("/api/admin/users", async (IDbConnection db) =>
         {
-            var rows = await db.QueryAsync("SELECT u.*, COALESCE((SELECT SUM(amount) FROM wallet_transaction WHERE user_id = u.id), 0) AS wallet_balance, COALESCE(p.status, 'offline') AS presence FROM app_user u LEFT JOIN wallet_account w ON w.user_id = u.id LEFT JOIN host_presence p ON p.user_id = u.id WHERE u.role <> 'admin' ORDER BY u.created_at DESC LIMIT 500");
+            var rows = await db.QueryAsync("SELECT u.*, COALESCE((SELECT SUM(amount) FROM wallet_transaction WHERE user_id = u.id), 0) AS wallet_balance, COALESCE(p.status, 'offline') AS presence FROM app_user u LEFT JOIN wallet_account w ON w.user_id = u.id LEFT JOIN user_presence p ON p.user_id = u.id WHERE u.role <> 'admin' ORDER BY u.created_at DESC LIMIT 500");
             return Results.Ok(rows);
         });
 
         app.MapPost("/api/admin/users/{userId:guid}/make-host", async (Guid userId, AdminMakeHostDto dto, IDbConnection db) =>
         {
-            await db.ExecuteAsync("UPDATE app_user SET is_host=true,is_host_approved=@Approved, role=(CASE WHEN @Approved THEN 'host' ELSE 'user' END) WHERE id=@userId; INSERT INTO host_profile(user_id,category_id,rate_per_minute,sort_order,status) VALUES(@userId,@CategoryId,@RatePerMinute,@SortOrder,CASE WHEN @Approved THEN 'approved' ELSE 'pending' END) ON CONFLICT(user_id) DO UPDATE SET category_id=@CategoryId,rate_per_minute=@RatePerMinute,sort_order=@SortOrder,status=CASE WHEN @Approved THEN 'approved' ELSE 'pending' END; INSERT INTO host_presence(user_id,status) VALUES(@userId,'offline') ON CONFLICT(user_id) DO NOTHING;", new { userId, dto.CategoryId, dto.RatePerMinute, dto.SortOrder, dto.Approved });
+            await db.ExecuteAsync("UPDATE app_user SET is_host=true,is_host_approved=@Approved, role=(CASE WHEN @Approved THEN 'host' ELSE 'user' END) WHERE id=@userId; INSERT INTO host_profile(user_id,category_id,rate_per_minute,sort_order,status) VALUES(@userId,@CategoryId,@RatePerMinute,@SortOrder,CASE WHEN @Approved THEN 'approved' ELSE 'pending' END) ON CONFLICT(user_id) DO UPDATE SET category_id=@CategoryId,rate_per_minute=@RatePerMinute,sort_order=@SortOrder,status=CASE WHEN @Approved THEN 'approved' ELSE 'pending' END; INSERT INTO user_presence(user_id,status) VALUES(@userId,'offline') ON CONFLICT(user_id) DO NOTHING;", new { userId, dto.CategoryId, dto.RatePerMinute, dto.SortOrder, dto.Approved });
             return Results.Ok(new { message = "User host status updated" });
         });
 
         app.MapPost("/api/admin/users/{userId:guid}/remove-host", async (Guid userId, IDbConnection db) =>
         {
-            await db.ExecuteAsync("UPDATE app_user SET is_host=false,is_host_approved=false, role='user' WHERE id=@userId; DELETE FROM host_profile WHERE user_id=@userId; DELETE FROM host_presence WHERE user_id=@userId;", new { userId });
+            await db.ExecuteAsync("UPDATE app_user SET is_host=false,is_host_approved=false, role='user' WHERE id=@userId; DELETE FROM host_profile WHERE user_id=@userId; DELETE FROM user_presence WHERE user_id=@userId;", new { userId });
             return Results.Ok(new { message = "User host status removed" });
         });
 
