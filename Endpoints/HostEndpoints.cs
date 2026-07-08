@@ -1,5 +1,7 @@
 using System.Data;
 using Dapper;
+using Microsoft.AspNetCore.SignalR;
+using PruvaVoice.Api.Hubs;
 using PruvaVoice.Api.Models;
 using PruvaVoice.Api.Services;
 
@@ -27,10 +29,11 @@ public static class HostEndpoints
             return Results.Ok(new { hostUserId, available = row?.status == "online", status = row?.status ?? "offline", scheduleOnlineAt = row?.schedule_online_at, scheduleOfflineAt = row?.schedule_offline_at });
         }).RequireAuthorization();
 
-        app.MapPost("/api/hosts/presence", async (HostPresenceDto dto, ClaimsPrincipal cp, IDbConnection db) =>
+        app.MapPost("/api/hosts/presence", async (HostPresenceDto dto, ClaimsPrincipal cp, IDbConnection db, IHubContext<CallHub> hubContext) =>
         {
             var uid = CurrentUser.Id(cp);
             await db.ExecuteAsync("INSERT INTO host_presence(user_id,status,schedule_online_at,schedule_offline_at,last_seen_at,updated_at) VALUES(@uid,@Status,@ScheduleOnlineAt,@ScheduleOfflineAt,now(),now()) ON CONFLICT(user_id) DO UPDATE SET status=@Status,schedule_online_at=@ScheduleOnlineAt,schedule_offline_at=@ScheduleOfflineAt,last_seen_at=now(),updated_at=now()", new { uid, dto.Status, dto.ScheduleOnlineAt, dto.ScheduleOfflineAt });
+            await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = uid.ToString(), status = dto.Status });
             return Results.Ok(new { message = "Presence updated" });
         }).RequireAuthorization();
 
