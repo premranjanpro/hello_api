@@ -19,7 +19,7 @@ public record CreatePaymentOrderDto(decimal Amount, string Purpose, string Provi
 public record PaymentWebhookDto(string Provider, string EventId, string Signature, object Payload);
 public record CategoryDto(string Name, string? Description, string? Icon, int SortOrder, bool IsActive);
 
-public record OnboardingDto(string DisplayGender, DateOnly Dob, bool Is18PlusConfirmed, string PreferredLanguage);
+public record OnboardingDto(string DisplayGender, DateTime Dob, bool Is18PlusConfirmed, string PreferredLanguage);
 
 public record AdminSendNotificationDto(Guid? UserId, string Title, string Body, string? ImageUrl, Dictionary<string, string>? Data);
 
