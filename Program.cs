@@ -42,7 +42,7 @@ app.UseSwaggerUI();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/", () => Results.Ok(new { app = "Pruva Voice", status = "running" }));
+app.MapGet("/", () => Results.Ok(new { app = "Hello24", status = "running" }));
 app.MapHub<CallHub>("/hubs/calls");
 
 app.MapAuthEndpoints();
