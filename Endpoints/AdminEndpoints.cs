@@ -17,7 +17,7 @@ public static class AdminEndpoints
 
         app.MapGet("/api/admin/users", async (IDbConnection db) =>
         {
-            var rows = await db.QueryAsync("SELECT u.*, COALESCE((SELECT SUM(amount) FROM wallet_transaction WHERE user_id = u.id), 0) AS wallet_balance FROM app_user u LEFT JOIN wallet_account w ON w.user_id = u.id WHERE u.role <> 'admin' ORDER BY u.created_at DESC LIMIT 500");
+            var rows = await db.QueryAsync("SELECT u.*, COALESCE((SELECT SUM(amount) FROM wallet_transaction WHERE user_id = u.id), 0) AS wallet_balance, COALESCE(p.status, 'offline') AS presence FROM app_user u LEFT JOIN wallet_account w ON w.user_id = u.id LEFT JOIN host_presence p ON p.user_id = u.id WHERE u.role <> 'admin' ORDER BY u.created_at DESC LIMIT 500");
             return Results.Ok(rows);
         });
 
