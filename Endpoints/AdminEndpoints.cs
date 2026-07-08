@@ -17,7 +17,7 @@ public static class AdminEndpoints
 
         app.MapGet("/api/admin/users", async (IDbConnection db) =>
         {
-            var rows = await db.QueryAsync("SELECT u.*, COALESCE(w.balance, 0) AS wallet_balance FROM app_user u LEFT JOIN wallet_account w ON w.user_id = u.id WHERE u.role <> 'admin' ORDER BY u.created_at DESC LIMIT 500");
+            var rows = await db.QueryAsync("SELECT u.*, COALESCE((SELECT SUM(amount) FROM wallet_transaction WHERE user_id = u.id), 0) AS wallet_balance FROM app_user u LEFT JOIN wallet_account w ON w.user_id = u.id WHERE u.role <> 'admin' ORDER BY u.created_at DESC LIMIT 500");
             return Results.Ok(rows);
         });
 
@@ -42,6 +42,12 @@ public static class AdminEndpoints
         app.MapPost("/api/admin/users/{userId:guid}/update", async (Guid userId, AdminUpdateUserDto dto, IDbConnection db) =>
         {
             await db.ExecuteAsync("UPDATE app_user SET username=@Username, phone=@Phone, display_gender=@Gender, display_name=@Username WHERE id=@userId", new { userId, dto.Username, dto.Phone, dto.Gender });
+            var currentBalance = await db.ExecuteScalarAsync<decimal>("SELECT COALESCE(SUM(amount), 0) FROM wallet_transaction WHERE user_id = @userId", new { userId });
+            var diff = dto.WalletBalance - currentBalance;
+            if (diff != 0)
+            {
+                await db.ExecuteAsync("INSERT INTO wallet_transaction(user_id, txn_type, amount, note) VALUES(@userId, 'adjustment', @diff, 'Admin manual balance adjustment')", new { userId, diff });
+            }
             await db.ExecuteAsync("INSERT INTO wallet_account(user_id, balance, currency, updated_at) VALUES(@userId, @WalletBalance, 'INR', now()) ON CONFLICT(user_id) DO UPDATE SET balance=@WalletBalance, updated_at=now();", new { userId, dto.WalletBalance });
             return Results.Ok(new { message = "User details updated successfully" });
         });

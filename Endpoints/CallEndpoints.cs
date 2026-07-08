@@ -19,7 +19,7 @@ public static class CallEndpoints
             var blocked = await db.ExecuteScalarAsync<bool>("SELECT EXISTS(SELECT 1 FROM block_list WHERE (blocker_user_id=@callerId AND blocked_user_id=@HostUserId) OR (blocker_user_id=@HostUserId AND blocked_user_id=@callerId))", new { callerId, dto.HostUserId });
             if (blocked) return Results.BadRequest("User blocked");
 
-            var balance = await db.ExecuteScalarAsync<decimal>("SELECT balance FROM wallet_account WHERE user_id=@callerId", new { callerId });
+            var balance = await db.ExecuteScalarAsync<decimal>("SELECT COALESCE(SUM(amount), 0) FROM wallet_transaction WHERE user_id=@callerId", new { callerId });
             var minHold = Math.Max(20, (decimal)host.rate_per_minute * 5);
             if (balance < minHold) return Results.BadRequest("Insufficient wallet balance");
 
