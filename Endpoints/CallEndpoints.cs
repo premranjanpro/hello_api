@@ -2,6 +2,8 @@ using System.Data;
 using System.Security.Claims;
 using System.Text.Json;
 using Dapper;
+using Microsoft.AspNetCore.SignalR;
+using PruvaVoice.Api.Hubs;
 using PruvaVoice.Api.Models;
 using PruvaVoice.Api.Services;
 
@@ -11,7 +13,7 @@ public static class CallEndpoints
 {
     public static void MapCallEndpoints(this WebApplication app)
     {
-        app.MapPost("/api/calls/start", async (StartCallDto dto, ClaimsPrincipal cp, IDbConnection db, LiveKitTokenService livekit, CallNotifier notifier) =>
+        app.MapPost("/api/calls/start", async (StartCallDto dto, ClaimsPrincipal cp, IDbConnection db, LiveKitTokenService livekit, CallNotifier notifier, IHubContext<CallHub> hubContext) =>
         {
             var callerId = CurrentUser.Id(cp);
             var host = await db.QueryFirstOrDefaultAsync<dynamic>("SELECT hp.*,u.username,u.status AS user_status,COALESCE(p.status,'offline') AS presence FROM host_profile hp JOIN app_user u ON u.id=hp.user_id LEFT JOIN host_presence p ON p.user_id=u.id WHERE hp.user_id=@HostUserId AND hp.status='approved'", new { dto.HostUserId });
@@ -29,7 +31,10 @@ public static class CallEndpoints
             var latestToken = await db.ExecuteScalarAsync<string?>("SELECT fcm_token FROM user_device WHERE user_id=@HostUserId ORDER BY last_seen_at DESC LIMIT 1", new { dto.HostUserId });
             var callerUsername = await db.ExecuteScalarAsync<string?>("SELECT COALESCE(username, phone) FROM app_user WHERE id=@callerId", new { callerId });
             await notifier.NotifyIncomingCallAsync(db, dto.HostUserId, callId, callerUsername ?? "Caller", latestToken);
-            await db.ExecuteAsync("UPDATE host_presence SET status='busy', updated_at=now() WHERE user_id=@HostUserId", new { dto.HostUserId });
+            await db.ExecuteAsync("INSERT INTO host_presence(user_id, status, last_seen_at, updated_at) VALUES(@callerId, 'busy', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='busy', last_seen_at=now(), updated_at=now()", new { callerId });
+            await db.ExecuteAsync("INSERT INTO host_presence(user_id, status, last_seen_at, updated_at) VALUES(@HostUserId, 'busy', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='busy', last_seen_at=now(), updated_at=now()", new { dto.HostUserId });
+            await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = callerId.ToString(), status = "busy" });
+            await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = dto.HostUserId.ToString(), status = "busy" });
 
             var credJson = await db.ExecuteScalarAsync<string>("SELECT config_json::text FROM integration_credential WHERE provider_type='livekit' AND is_active=true");
             var config = string.IsNullOrWhiteSpace(credJson) ? null : JsonSerializer.Deserialize<Dictionary<string, string>>(credJson);
@@ -57,7 +62,7 @@ public static class CallEndpoints
             return Results.Ok(new { liveKitUrl, hostToken = livekit.CreateToken(apiKey, apiSecret, (string)call.room_name, hostId.ToString()) });
         }).RequireAuthorization();
 
-        app.MapPost("/api/calls/{callId:guid}/end", async (Guid callId, ClaimsPrincipal cp, IDbConnection db) =>
+        app.MapPost("/api/calls/{callId:guid}/end", async (Guid callId, ClaimsPrincipal cp, IDbConnection db, IHubContext<CallHub> hubContext) =>
         {
             var call = await db.QueryFirstOrDefaultAsync<dynamic>("SELECT * FROM call_session WHERE id=@callId", new { callId });
             if (call == null) return Results.NotFound();
@@ -73,6 +78,9 @@ public static class CallEndpoints
             await db.ExecuteAsync("INSERT INTO host_earning_ledger(host_user_id,call_session_id,txn_type,amount,note) VALUES(@Host,@callId,'earning',@hostEarn,'Call earning')", new { Host = (Guid)call.host_user_id, callId, hostEarn });
             await db.ExecuteAsync("UPDATE host_profile SET completed_calls=completed_calls+1 WHERE user_id=@Host", new { Host = (Guid)call.host_user_id });
             await db.ExecuteAsync("UPDATE host_presence SET status='online',updated_at=now() WHERE user_id=@Host", new { Host = (Guid)call.host_user_id });
+            await db.ExecuteAsync("INSERT INTO host_presence(user_id, status, last_seen_at, updated_at) VALUES(@Caller, 'online', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='online', last_seen_at=now(), updated_at=now()", new { Caller = (Guid)call.caller_user_id });
+            await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = call.host_user_id.ToString(), status = "online" });
+            await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = call.caller_user_id.ToString(), status = "online" });
             await db.ExecuteAsync("INSERT INTO call_event(call_session_id,event_type,metadata) VALUES(@callId,'ended',jsonb_build_object('seconds',@seconds,'amount',@amount))", new { callId, seconds, amount });
 
             return Results.Ok(new { seconds, amount, hostEarn, commission });

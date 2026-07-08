@@ -14,7 +14,20 @@ public class CallHub(IServiceScopeFactory scopeFactory) : Hub
     {
         var userId = Context.UserIdentifier ?? Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (!string.IsNullOrWhiteSpace(userId))
+        {
             await Groups.AddToGroupAsync(Context.ConnectionId, $"user:{userId}");
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<IDbConnection>();
+                await db.ExecuteAsync("INSERT INTO host_presence(user_id, status, last_seen_at, updated_at) VALUES(CAST(@userId AS uuid), 'online', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='online', last_seen_at=now(), updated_at=now()", new { userId });
+                await Clients.All.SendAsync("presenceChanged", new { userId, status = "online" });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CallHub] Error in OnConnectedAsync: {ex.Message}");
+            }
+        }
         await base.OnConnectedAsync();
     }
 
