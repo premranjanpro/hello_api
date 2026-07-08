@@ -13,7 +13,7 @@ public static class CallEndpoints
 {
     public static void MapCallEndpoints(this WebApplication app)
     {
-        app.MapPost("/api/calls/start", async (StartCallDto dto, ClaimsPrincipal cp, IDbConnection db, LiveKitTokenService livekit, CallNotifier notifier, IHubContext<CallHub> hubContext) =>
+        app.MapPost("/api/calls/start", async (StartCallDto dto, ClaimsPrincipal cp, IDbConnection db, LiveKitTokenService livekit, CallNotifier notifier, IHubContext<CallHub> hubContext, HttpContext httpContext) =>
         {
             var callerId = CurrentUser.Id(cp);
             var host = await db.QueryFirstOrDefaultAsync<dynamic>("SELECT hp.*,u.username,u.status AS user_status,COALESCE(p.status,'offline') AS presence FROM host_profile hp JOIN app_user u ON u.id=hp.user_id LEFT JOIN user_presence p ON p.user_id=u.id WHERE hp.user_id=@HostUserId AND hp.status='approved'", new { dto.HostUserId });
@@ -41,11 +41,16 @@ public static class CallEndpoints
             var apiKey = config != null && config.TryGetValue("apiKey", out var ak) ? ak : "devkey";
             var apiSecret = config != null && config.TryGetValue("apiSecret", out var asec) ? asec : "devsecret";
             var liveKitUrl = config != null && config.TryGetValue("url", out var u) ? u : "ws://localhost:7880";
+            if (liveKitUrl.Contains("localhost"))
+            {
+                var requestHost = httpContext.Request.Host.Host;
+                liveKitUrl = liveKitUrl.Replace("localhost", requestHost);
+            }
 
             return Results.Ok(new { callId, roomName = room, liveKitUrl, callerToken = livekit.CreateToken(apiKey, apiSecret, room, callerId.ToString()) });
         }).RequireAuthorization();
 
-        app.MapPost("/api/calls/{callId:guid}/accept", async (Guid callId, ClaimsPrincipal cp, IDbConnection db, LiveKitTokenService livekit) =>
+        app.MapPost("/api/calls/{callId:guid}/accept", async (Guid callId, ClaimsPrincipal cp, IDbConnection db, LiveKitTokenService livekit, HttpContext httpContext) =>
         {
             var hostId = CurrentUser.Id(cp);
             var call = await db.QueryFirstOrDefaultAsync<dynamic>("SELECT * FROM call_session WHERE id=@callId AND host_user_id=@hostId", new { callId, hostId });
@@ -58,6 +63,11 @@ public static class CallEndpoints
             var apiKey = config != null && config.TryGetValue("apiKey", out var ak) ? ak : "devkey";
             var apiSecret = config != null && config.TryGetValue("apiSecret", out var asec) ? asec : "devsecret";
             var liveKitUrl = config != null && config.TryGetValue("url", out var u) ? u : "ws://localhost:7880";
+            if (liveKitUrl.Contains("localhost"))
+            {
+                var requestHost = httpContext.Request.Host.Host;
+                liveKitUrl = liveKitUrl.Replace("localhost", requestHost);
+            }
 
             return Results.Ok(new { liveKitUrl, hostToken = livekit.CreateToken(apiKey, apiSecret, (string)call.room_name, hostId.ToString()) });
         }).RequireAuthorization();
