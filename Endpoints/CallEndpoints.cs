@@ -49,6 +49,47 @@ public static class CallEndpoints
 
             return Results.Ok(new { callId, roomName = room, liveKitUrl, callerToken = livekit.CreateToken(apiKey, apiSecret, room, callerId.ToString()) });
         }).RequireAuthorization();
+        // Per-minute wallet deduction called every 60s by caller during active call
+        app.MapPost("/api/calls/{callId:guid}/heartbeat", async (Guid callId, ClaimsPrincipal cp, IDbConnection db, IHubContext<CallHub> hubContext) =>
+        {
+            var callerId = CurrentUser.Id(cp);
+            var call = await db.QueryFirstOrDefaultAsync<dynamic>(
+                "SELECT * FROM call_session WHERE id=@callId AND caller_user_id=@callerId AND status='connected'",
+                new { callId, callerId });
+            if (call == null) return Results.Ok(new { ok = false, reason = "Call not active" });
+
+            var rate = (decimal)call.rate_per_minute;
+            var minuteCharge = Math.Round(rate, 2);
+
+            // Check wallet balance before deducting
+            var balance = await db.ExecuteScalarAsync<decimal>(
+                "SELECT COALESCE(SUM(amount),0) FROM wallet_transaction WHERE user_id=@callerId",
+                new { callerId });
+
+            if (balance < minuteCharge)
+            {
+                // Insufficient balance — end call automatically
+                await db.ExecuteAsync(
+                    "UPDATE call_session SET status='ended',ended_at=now(),end_reason='insufficient_balance' WHERE id=@callId",
+                    new { callId });
+                await db.ExecuteAsync(
+                    "UPDATE user_presence SET status='online',updated_at=now() WHERE user_id=@callerId OR user_id=@hostId",
+                    new { callerId, hostId = (Guid)call.host_user_id });
+                await hubContext.Clients.All.SendAsync("callEnded", new { callId = callId.ToString(), endedByUserId = callerId.ToString(), reason = "insufficient_balance" });
+                return Results.Ok(new { ok = false, reason = "insufficient_balance", ended = true });
+            }
+
+            // Deduct one minute from wallet
+            await db.ExecuteAsync(
+                "INSERT INTO wallet_transaction(user_id,txn_type,amount,reference_type,reference_id,note) VALUES(@callerId,'call_charge',-@minuteCharge,'call',@callId,'Voice call - 1 minute')",
+                new { callerId, minuteCharge, callId });
+            await db.ExecuteAsync(
+                "UPDATE wallet_account SET balance=balance-@minuteCharge WHERE user_id=@callerId",
+                new { callerId, minuteCharge });
+
+            var newBalance = balance - minuteCharge;
+            return Results.Ok(new { ok = true, deducted = minuteCharge, newBalance });
+        }).RequireAuthorization();
 
         app.MapPost("/api/calls/{callId:guid}/accept", async (Guid callId, ClaimsPrincipal cp, IDbConnection db, LiveKitTokenService livekit, HttpContext httpContext) =>
         {

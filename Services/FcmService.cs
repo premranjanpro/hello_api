@@ -74,9 +74,28 @@ public class FcmService
                 {
                     token = fcmToken,
                     data = data,
+                    notification = new
+                    {
+                        title = "📞 Incoming Voice Call",
+                        body = $"{callerUsername} is calling you right now!"
+                    },
                     android = new
                     {
-                        priority = "HIGH"
+                        priority = "HIGH",
+                        notification = new
+                        {
+                            channel_id = "incoming_calls",
+                            sound = "default",
+                            click_action = "CALL_INCOMING",
+                            icon = "@mipmap/ic_launcher",
+                            color = "#7C3AED",
+                            tag = callId.ToString(),
+                            sticky = false,
+                            default_vibrate_timings = true,
+                            default_sound = true,
+                            notification_priority = "PRIORITY_MAX",
+                            visibility = "PUBLIC"
+                        }
                     }
                 }
             };
