@@ -63,8 +63,10 @@ public static class AuthEndpoints
             await db.ExecuteAsync("UPDATE otp_request SET verified_at=now() WHERE id=@Id", new { Id = req.id });
 
             var user = await db.QueryFirstOrDefaultAsync<AppUser>("SELECT id,phone,username,dob,display_name AS DisplayName,display_gender AS DisplayGender,role,status,is_host AS IsHost,is_host_approved AS IsHostApproved FROM app_user WHERE phone=@Phone", new { dto.Phone });
+            bool isNew = false;
             if (user == null)
             {
+                isNew = true;
                 var bonusVal = await db.QueryFirstOrDefaultAsync<string>("SELECT value FROM app_setting WHERE key='welcome_bonus_amount'");
                 decimal bonus = 5;
                 if (!string.IsNullOrEmpty(bonusVal) && decimal.TryParse(bonusVal, out decimal parsedBonus))
@@ -84,7 +86,7 @@ public static class AuthEndpoints
             }
 
             if (user.Status != "active") return Results.Forbid();
-            return Results.Ok(new { token = jwt.Create(user.Id, user.Phone, user.Role), user });
+            return Results.Ok(new { token = jwt.Create(user.Id, user.Phone, user.Role), user, isNew });
         });
     }
 }

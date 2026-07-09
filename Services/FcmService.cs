@@ -27,14 +27,31 @@ public class FcmService
             var credJson = await db.ExecuteScalarAsync<string>("SELECT config_json::text FROM integration_credential WHERE provider_type='fcm' AND is_active=true");
             if (string.IsNullOrWhiteSpace(credJson)) return;
 
-            using var doc = JsonDocument.Parse(credJson);
-            if (!doc.RootElement.TryGetProperty("serviceAccountJsonBase64", out var base64Prop)) return;
+            FirebaseServiceAccount? serviceAccount = null;
+            try
+            {
+                serviceAccount = JsonSerializer.Deserialize<FirebaseServiceAccount>(credJson);
+            }
+            catch {}
 
-            var base64Str = base64Prop.GetString();
-            if (string.IsNullOrWhiteSpace(base64Str)) return;
+            if (serviceAccount == null || string.IsNullOrWhiteSpace(serviceAccount.ProjectId))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(credJson);
+                    if (doc.RootElement.TryGetProperty("serviceAccountJsonBase64", out var base64Prop))
+                    {
+                        var base64Str = base64Prop.GetString();
+                        if (!string.IsNullOrWhiteSpace(base64Str))
+                        {
+                            var serviceAccountJson = Encoding.UTF8.GetString(Convert.FromBase64String(base64Str));
+                            serviceAccount = JsonSerializer.Deserialize<FirebaseServiceAccount>(serviceAccountJson);
+                        }
+                    }
+                }
+                catch {}
+            }
 
-            var serviceAccountJson = Encoding.UTF8.GetString(Convert.FromBase64String(base64Str));
-            var serviceAccount = JsonSerializer.Deserialize<FirebaseServiceAccount>(serviceAccountJson);
             if (serviceAccount == null || string.IsNullOrWhiteSpace(serviceAccount.ProjectId)) return;
 
             var accessToken = await GetAccessTokenAsync(serviceAccount);
@@ -158,14 +175,31 @@ public class FcmService
             var credJson = await db.ExecuteScalarAsync<string>("SELECT config_json::text FROM integration_credential WHERE provider_type='fcm' AND is_active=true");
             if (string.IsNullOrWhiteSpace(credJson)) return;
 
-            using var doc = JsonDocument.Parse(credJson);
-            if (!doc.RootElement.TryGetProperty("serviceAccountJsonBase64", out var base64Prop)) return;
+            FirebaseServiceAccount? serviceAccount = null;
+            try
+            {
+                serviceAccount = JsonSerializer.Deserialize<FirebaseServiceAccount>(credJson);
+            }
+            catch {}
 
-            var base64Str = base64Prop.GetString();
-            if (string.IsNullOrWhiteSpace(base64Str)) return;
+            if (serviceAccount == null || string.IsNullOrWhiteSpace(serviceAccount.ProjectId))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(credJson);
+                    if (doc.RootElement.TryGetProperty("serviceAccountJsonBase64", out var base64Prop))
+                    {
+                        var base64Str = base64Prop.GetString();
+                        if (!string.IsNullOrWhiteSpace(base64Str))
+                        {
+                            var serviceAccountJson = Encoding.UTF8.GetString(Convert.FromBase64String(base64Str));
+                            serviceAccount = JsonSerializer.Deserialize<FirebaseServiceAccount>(serviceAccountJson);
+                        }
+                    }
+                }
+                catch {}
+            }
 
-            var serviceAccountJson = Encoding.UTF8.GetString(Convert.FromBase64String(base64Str));
-            var serviceAccount = JsonSerializer.Deserialize<FirebaseServiceAccount>(serviceAccountJson);
             if (serviceAccount == null || string.IsNullOrWhiteSpace(serviceAccount.ProjectId)) return;
 
             var accessToken = await GetAccessTokenAsync(serviceAccount);
@@ -180,7 +214,6 @@ public class FcmService
 
             var messageObj = new Dictionary<string, object>
             {
-                ["token"] = fcmToken,
                 ["notification"] = new
                 {
                     title = title,
@@ -211,6 +244,16 @@ public class FcmService
                     }
                 }
             };
+
+            if (fcmToken.StartsWith("/topics/") || fcmToken.StartsWith("topic:"))
+            {
+                var topicName = fcmToken.Replace("/topics/", "").Replace("topic:", "");
+                messageObj["topic"] = topicName;
+            }
+            else
+            {
+                messageObj["token"] = fcmToken;
+            }
 
             var payload = new { message = messageObj };
 

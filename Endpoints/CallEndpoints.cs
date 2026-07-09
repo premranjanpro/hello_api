@@ -76,13 +76,27 @@ public static class CallEndpoints
         {
             var call = await db.QueryFirstOrDefaultAsync<dynamic>("SELECT * FROM call_session WHERE id=@callId", new { callId });
             if (call == null) return Results.NotFound();
-            int seconds = 0;
-            if (call.connected_at != null) seconds = (int)Math.Ceiling((DateTimeOffset.UtcNow - (DateTimeOffset)call.connected_at).TotalSeconds);
-            var amount = Math.Round(((decimal)seconds / 60m) * (decimal)call.rate_per_minute, 2);
+
+            var userId = CurrentUser.Id(cp);
+
+            if (call.status == "ended")
+            {
+                int seconds = call.billable_seconds ?? 0;
+                var askRatingVal = await db.QueryFirstOrDefaultAsync<string>("SELECT value FROM app_setting WHERE key='ask_call_rating'");
+                bool askRating = (askRatingVal != null && askRatingVal.ToLower() == "true") && 
+                                 (call.connected_at != null) && 
+                                 (seconds >= 300) &&
+                                 (call.caller_user_id == userId);
+                return Results.Ok(new { seconds, askRating });
+            }
+
+            int secondsElapsed = 0;
+            if (call.connected_at != null) secondsElapsed = (int)Math.Ceiling((DateTimeOffset.UtcNow - (DateTimeOffset)call.connected_at).TotalSeconds);
+            var amount = Math.Round(((decimal)secondsElapsed / 60m) * (decimal)call.rate_per_minute, 2);
             var commission = Math.Round(amount * 0.25m, 2);
             var hostEarn = amount - commission;
 
-            await db.ExecuteAsync("UPDATE call_session SET status='ended',ended_at=now(),billable_seconds=@seconds,total_amount=@amount,host_earning=@hostEarn,platform_commission=@commission,end_reason='normal' WHERE id=@callId", new { callId, seconds, amount, hostEarn, commission });
+            await db.ExecuteAsync("UPDATE call_session SET status='ended',ended_at=now(),billable_seconds=@secondsElapsed,total_amount=@amount,host_earning=@hostEarn,platform_commission=@commission,end_reason='normal' WHERE id=@callId", new { callId, secondsElapsed, amount, hostEarn, commission });
             await db.ExecuteAsync("UPDATE wallet_account SET balance=balance-@amount WHERE user_id=@Caller", new { amount, Caller = (Guid)call.caller_user_id });
             await db.ExecuteAsync("INSERT INTO wallet_transaction(user_id,txn_type,amount,reference_type,reference_id,note) VALUES(@Caller,'call_charge',-@amount,'call',@callId,'Voice call charge')", new { Caller = (Guid)call.caller_user_id, amount, callId });
             await db.ExecuteAsync("INSERT INTO host_earning_ledger(host_user_id,call_session_id,txn_type,amount,note) VALUES(@Host,@callId,'earning',@hostEarn,'Call earning')", new { Host = (Guid)call.host_user_id, callId, hostEarn });
@@ -91,9 +105,15 @@ public static class CallEndpoints
             await db.ExecuteAsync("INSERT INTO user_presence(user_id, status, last_seen_at, updated_at) VALUES(@Caller, 'online', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='online', last_seen_at=now(), updated_at=now()", new { Caller = (Guid)call.caller_user_id });
             await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = call.host_user_id.ToString(), status = "online" });
             await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = call.caller_user_id.ToString(), status = "online" });
-            await db.ExecuteAsync("INSERT INTO call_event(call_session_id,event_type,metadata) VALUES(@callId,'ended',jsonb_build_object('seconds',@seconds,'amount',@amount))", new { callId, seconds, amount });
+            await db.ExecuteAsync("INSERT INTO call_event(call_session_id,event_type,metadata) VALUES(@callId,'ended',jsonb_build_object('seconds',@secondsElapsed,'amount',@amount))", new { callId, secondsElapsed, amount });
 
-            return Results.Ok(new { seconds, amount, hostEarn, commission });
+            var askRatingValFinal = await db.QueryFirstOrDefaultAsync<string>("SELECT value FROM app_setting WHERE key='ask_call_rating'");
+            bool askRatingFinal = (askRatingValFinal != null && askRatingValFinal.ToLower() == "true") && 
+                                  (call.connected_at != null) && 
+                                  (secondsElapsed >= 300) &&
+                                  (call.caller_user_id == userId);
+
+            return Results.Ok(new { seconds = secondsElapsed, amount, hostEarn, commission, askRating = askRatingFinal });
         }).RequireAuthorization();
 
         app.MapPost("/api/calls/{callId:guid}/rating", async (Guid callId, RateCallDto dto, ClaimsPrincipal cp, IDbConnection db) =>

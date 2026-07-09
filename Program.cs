@@ -72,6 +72,7 @@ app.MapCallEndpoints();
 app.MapWalletEndpoints();
 app.MapAdminEndpoints();
 app.MapAdminSettingsEndpoints();
+app.MapDashboardCampaignEndpoints();
 app.MapPaymentEndpoints();
 
 app.Run();

@@ -224,26 +224,40 @@ public static class AdminEndpoints
             // Trigger background FCM dispatch if not scheduled for later
             if (!dto.ScheduleTime.HasValue || dto.ScheduleTime.Value <= DateTime.UtcNow)
             {
-                List<string> tokens;
-                if (dto.TargetUserId.HasValue)
+                _ = Task.Run(async () =>
                 {
-                    tokens = (await db.QueryAsync<string>("SELECT fcm_token FROM user_device WHERE user_id=@TargetUserId AND fcm_token IS NOT NULL AND fcm_token <> ''", new { dto.TargetUserId })).ToList();
-                }
-                else
-                {
-                    tokens = (await db.QueryAsync<string>("SELECT DISTINCT fcm_token FROM user_device WHERE fcm_token IS NOT NULL AND fcm_token <> ''")).ToList();
-                }
-
-                if (tokens.Count > 0)
-                {
-                    _ = Task.Run(async () =>
+                    try
                     {
-                        foreach (var token in tokens)
+                        if (dto.TargetType == "all")
                         {
-                            await fcm.SendNotificationAsync(db, token, dto.Title, dto.Body, dto.ImageUrl, null);
+                            await fcm.SendNotificationAsync(db, "topic:hello24_all", dto.Title, dto.Body, dto.ImageUrl, null);
                         }
-                    });
-                }
+                        else if (dto.TargetType == "male")
+                        {
+                            await fcm.SendNotificationAsync(db, "topic:hello24_male", dto.Title, dto.Body, dto.ImageUrl, null);
+                        }
+                        else if (dto.TargetType == "female")
+                        {
+                            await fcm.SendNotificationAsync(db, "topic:hello24_female", dto.Title, dto.Body, dto.ImageUrl, null);
+                        }
+                        else if (dto.TargetType == "single" && dto.TargetUserId != null)
+                        {
+                            var tokens = (await db.QueryAsync<string>("SELECT fcm_token FROM user_device WHERE user_id=@TargetUserId AND fcm_token IS NOT NULL AND fcm_token <> ''", new { dto.TargetUserId })).ToList();
+                            foreach (var token in tokens)
+                            {
+                                try
+                                {
+                                    await fcm.SendNotificationAsync(db, token, dto.Title, dto.Body, dto.ImageUrl, null);
+                                }
+                                catch {}
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FCM notification campaign failed: {ex.Message}");
+                    }
+                });
             }
 
             return Results.Ok(new { id, message = "Campaign created and broadcast initiated" });

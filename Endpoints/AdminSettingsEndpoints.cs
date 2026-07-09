@@ -32,11 +32,12 @@ public static class AdminSettingsEndpoints
                 var current = await db.QueryFirstAsync<dynamic>("SELECT provider_type FROM integration_credential WHERE id=@id", new { id });
                 await db.ExecuteAsync("UPDATE integration_credential SET is_active=false WHERE provider_type=@providerType", new { providerType = (string)current.provider_type });
             }
-            await db.ExecuteAsync("UPDATE integration_credential SET config_json=@ConfigJson::jsonb, is_active=@IsActive, updated_at=now() WHERE id=@id", new { id, dto.ConfigJson, dto.IsActive });
+            var configJsonStr = dto.ConfigJson.GetRawText();
+            await db.ExecuteAsync("UPDATE integration_credential SET config_json=@configJsonStr::jsonb, is_active=@IsActive, updated_at=now() WHERE id=@id", new { id, configJsonStr, dto.IsActive });
             return Results.Ok(new { message = "Integration saved" });
         });
     }
 }
 
 public record SettingUpdateDto(string Value);
-public record IntegrationUpdateDto(string ConfigJson, bool IsActive);
+public record IntegrationUpdateDto(System.Text.Json.JsonElement ConfigJson, bool IsActive);
