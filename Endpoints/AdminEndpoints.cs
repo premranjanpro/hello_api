@@ -226,37 +226,55 @@ public static class AdminEndpoints
             {
                 _ = Task.Run(async () =>
                 {
+                    var status = "success";
+                    var logsList = new List<string>();
                     try
                     {
                         if (dto.TargetType == "all")
                         {
-                            await fcm.SendNotificationAsync(db, "topic:hello24_all", dto.Title, dto.Body, dto.ImageUrl, null);
+                            var res = await fcm.SendNotificationAsync(db, "topic:hello24_all", dto.Title, dto.Body, dto.ImageUrl, null);
+                            logsList.Add($"Topic (All): Success={res.success}, Log={res.log}");
+                            if (!res.success) status = "failed";
                         }
                         else if (dto.TargetType == "male")
                         {
-                            await fcm.SendNotificationAsync(db, "topic:hello24_male", dto.Title, dto.Body, dto.ImageUrl, null);
+                            var res = await fcm.SendNotificationAsync(db, "topic:hello24_male", dto.Title, dto.Body, dto.ImageUrl, null);
+                            logsList.Add($"Topic (Male): Success={res.success}, Log={res.log}");
+                            if (!res.success) status = "failed";
                         }
                         else if (dto.TargetType == "female")
                         {
-                            await fcm.SendNotificationAsync(db, "topic:hello24_female", dto.Title, dto.Body, dto.ImageUrl, null);
+                            var res = await fcm.SendNotificationAsync(db, "topic:hello24_female", dto.Title, dto.Body, dto.ImageUrl, null);
+                            logsList.Add($"Topic (Female): Success={res.success}, Log={res.log}");
+                            if (!res.success) status = "failed";
                         }
                         else if (dto.TargetType == "single" && dto.TargetUserId != null)
                         {
                             var tokens = (await db.QueryAsync<string>("SELECT fcm_token FROM user_device WHERE user_id=@TargetUserId AND fcm_token IS NOT NULL AND fcm_token <> ''", new { dto.TargetUserId })).ToList();
-                            foreach (var token in tokens)
+                            if (tokens.Count == 0)
                             {
-                                try
+                                status = "failed";
+                                logsList.Add("No registered FCM tokens found for the targeted user.");
+                            }
+                            else
+                            {
+                                foreach (var token in tokens)
                                 {
-                                    await fcm.SendNotificationAsync(db, token, dto.Title, dto.Body, dto.ImageUrl, null);
+                                    var res = await fcm.SendNotificationAsync(db, token, dto.Title, dto.Body, dto.ImageUrl, null);
+                                    logsList.Add($"Token ({token.Substring(0, Math.Min(10, token.Length))}...): Success={res.success}, Log={res.log}");
+                                    if (!res.success) status = "failed";
                                 }
-                                catch {}
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"FCM notification campaign failed: {ex.Message}");
+                        status = "failed";
+                        logsList.Add($"Unhandled Campaign Exception: {ex.Message}");
                     }
+
+                    // Update campaign row with execution status & logs
+                    await db.ExecuteAsync("UPDATE notification_campaign SET status=@status, fcm_logs=@logs WHERE id=@id", new { id, status, logs = string.Join("\n", logsList) });
                 });
             }
 

@@ -166,21 +166,26 @@ public class FcmService
             .Replace('/', '_');
     }
 
-    public async Task SendNotificationAsync(IDbConnection db, string fcmToken, string title, string body, string? imageUrl, Dictionary<string, string>? data)
+    public async Task<(bool success, string log)> SendNotificationAsync(IDbConnection db, string fcmToken, string title, string body, string? imageUrl, Dictionary<string, string>? data)
     {
-        if (string.IsNullOrWhiteSpace(fcmToken)) return;
+        if (string.IsNullOrWhiteSpace(fcmToken)) 
+            return (false, "FCM Token is empty");
 
         try
         {
             var credJson = await db.ExecuteScalarAsync<string>("SELECT config_json::text FROM integration_credential WHERE provider_type='fcm' AND is_active=true");
-            if (string.IsNullOrWhiteSpace(credJson)) return;
+            if (string.IsNullOrWhiteSpace(credJson)) 
+                return (false, "No active FCM configuration found in integration credentials table");
 
             FirebaseServiceAccount? serviceAccount = null;
             try
             {
                 serviceAccount = JsonSerializer.Deserialize<FirebaseServiceAccount>(credJson);
             }
-            catch {}
+            catch (Exception ex)
+            {
+                return (false, $"Failed to deserialize JSON credential: {ex.Message}");
+            }
 
             if (serviceAccount == null || string.IsNullOrWhiteSpace(serviceAccount.ProjectId))
             {
@@ -197,10 +202,14 @@ public class FcmService
                         }
                     }
                 }
-                catch {}
+                catch (Exception ex)
+                {
+                    return (false, $"Failed to parse base64 service account JSON: {ex.Message}");
+                }
             }
 
-            if (serviceAccount == null || string.IsNullOrWhiteSpace(serviceAccount.ProjectId)) return;
+            if (serviceAccount == null || string.IsNullOrWhiteSpace(serviceAccount.ProjectId)) 
+                return (false, "FCM Project ID is empty or invalid in credentials config");
 
             var accessToken = await GetAccessTokenAsync(serviceAccount);
             using var client = new HttpClient();
@@ -262,15 +271,18 @@ public class FcmService
             request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
             using var response = await client.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
             {
-                var responseBody = await response.Content.ReadAsStringAsync();
                 Console.WriteLine($"[FCM Admin] Error sending push: {response.StatusCode} - {responseBody}");
+                return (false, $"FCM server error {response.StatusCode}: {responseBody}");
             }
+            return (true, $"FCM send success: {responseBody}");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[FCM Admin] Exception sending push: {ex.Message}");
+            return (false, $"Exception during send: {ex.Message}\n{ex.StackTrace}");
         }
     }
 
