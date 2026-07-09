@@ -103,9 +103,12 @@ public static class CallEndpoints
             await db.ExecuteAsync("UPDATE host_profile SET completed_calls=completed_calls+1 WHERE user_id=@Host", new { Host = (Guid)call.host_user_id });
             await db.ExecuteAsync("UPDATE user_presence SET status='online',updated_at=now() WHERE user_id=@Host", new { Host = (Guid)call.host_user_id });
             await db.ExecuteAsync("INSERT INTO user_presence(user_id, status, last_seen_at, updated_at) VALUES(@Caller, 'online', now(), now()) ON CONFLICT(user_id) DO UPDATE SET status='online', last_seen_at=now(), updated_at=now()", new { Caller = (Guid)call.caller_user_id });
+            await db.ExecuteAsync("INSERT INTO call_event(call_session_id,event_type,metadata) VALUES(@callId,'ended',jsonb_build_object('seconds',@secondsElapsed,'amount',@amount))", new { callId, secondsElapsed, amount });
+
+            // Notify BOTH participants to exit the call screen immediately
+            await hubContext.Clients.All.SendAsync("callEnded", new { callId = callId.ToString(), endedByUserId = userId.ToString() });
             await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = call.host_user_id.ToString(), status = "online" });
             await hubContext.Clients.All.SendAsync("presenceChanged", new { userId = call.caller_user_id.ToString(), status = "online" });
-            await db.ExecuteAsync("INSERT INTO call_event(call_session_id,event_type,metadata) VALUES(@callId,'ended',jsonb_build_object('seconds',@secondsElapsed,'amount',@amount))", new { callId, secondsElapsed, amount });
 
             var askRatingValFinal = await db.QueryFirstOrDefaultAsync<string>("SELECT value FROM app_setting WHERE key='ask_call_rating'");
             bool askRatingFinal = (askRatingValFinal != null && askRatingValFinal.ToLower() == "true") && 
