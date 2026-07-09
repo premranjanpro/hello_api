@@ -234,43 +234,40 @@ public class FcmService
             using var client = new HttpClient();
             var url = $"https://fcm.googleapis.com/v1/projects/{serviceAccount.ProjectId}/messages:send";
 
-            var notificationData = data ?? new Dictionary<string, string>();
-            if (!notificationData.ContainsKey("type"))
+            object notificationBlock;
+            object androidNotificationBlock;
+            object apnsBlock;
+
+            // FCM v1 API silently drops messages with null fields in notification block
+            if (!string.IsNullOrWhiteSpace(imageUrl))
             {
-                notificationData["type"] = "admin_broadcast";
+                notificationBlock = new { title, body, image = imageUrl };
+                androidNotificationBlock = new { image = imageUrl };
+                apnsBlock = new
+                {
+                    payload = new { aps = new { mutableContent = 1 } },
+                    fcmOptions = new { image = imageUrl }
+                };
             }
+            else
+            {
+                notificationBlock = new { title, body };
+                androidNotificationBlock = new { };
+                apnsBlock = new
+                {
+                    payload = new { aps = new { mutableContent = 1 } }
+                };
+            }
+
+            var notificationData = data ?? new Dictionary<string, string>();
+            if (!notificationData.ContainsKey("type")) notificationData["type"] = "admin_broadcast";
 
             var messageObj = new Dictionary<string, object>
             {
-                ["notification"] = new
-                {
-                    title = title,
-                    body = body,
-                    image = imageUrl
-                },
+                ["notification"] = notificationBlock,
                 ["data"] = notificationData,
-                ["android"] = new
-                {
-                    priority = "HIGH",
-                    notification = new
-                    {
-                        image = imageUrl
-                    }
-                },
-                ["apns"] = new
-                {
-                    payload = new
-                    {
-                        aps = new
-                        {
-                            mutableContent = 1
-                        }
-                    },
-                    fcmOptions = new
-                    {
-                        image = imageUrl
-                    }
-                }
+                ["android"] = new { priority = "HIGH", notification = androidNotificationBlock },
+                ["apns"] = apnsBlock
             };
 
             if (fcmToken.StartsWith("/topics/") || fcmToken.StartsWith("topic:"))
