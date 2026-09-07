@@ -64,7 +64,10 @@ os.makedirs(RECORDINGS_DIR, exist_ok=True)
 def prewarm(proc: JobProcess):
     """Preload Silero VAD model into memory for zero cold-start delay."""
     logger.info("Prewarming Silero VAD model...")
-    proc.userdata["vad"] = silero.VAD.load()
+    proc.userdata["vad"] = silero.VAD.load(
+        activation_threshold=0.62,
+        min_speech_duration=0.18,
+    )
     logger.info("Silero VAD model prewarmed successfully.")
 
 
@@ -469,8 +472,11 @@ async def entrypoint(ctx: JobContext):
     recorder = AudioRecorder(recording_filepath, sample_rate=24000)
     recorder.start()
 
-    # Setup VAD (Silero)
-    vad = ctx.proc.userdata.get("vad") or silero.VAD.load()
+    # Setup VAD (Silero tuned to ignore murmurs and low energy breathing)
+    vad = ctx.proc.userdata.get("vad") or silero.VAD.load(
+        activation_threshold=0.62,
+        min_speech_duration=0.18,
+    )
 
     # Setup STT (Groq Whisper Turbo for ultra-fast response)
     stt = groq.STT(
@@ -524,8 +530,9 @@ async def entrypoint(ctx: JobContext):
         fnc_ctx=tools_ctx,
         chat_ctx=initial_chat_ctx,
         allow_interruptions=True,
-        interrupt_speech_duration=0.35,
-        min_endpointing_delay=0.55,
+        interrupt_speech_duration=0.5,
+        interrupt_min_words=1,
+        min_endpointing_delay=0.38,
         max_endpointing_delay=3.5,
         preemptive_synthesis=True,
         max_nested_fnc_calls=2,

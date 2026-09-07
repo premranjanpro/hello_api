@@ -45,7 +45,7 @@ class EdgeTTS(tts.TTS):
     Outputs 24kHz / 16-bit mono PCM AudioFrames directly into LiveKit voice pipeline.
     """
 
-    def __init__(self, voice: str = "hi-IN-SwaraNeural", rate: str = "+10%", pitch: str = "+0Hz", timeout_seconds: float = 3.5):
+    def __init__(self, voice: str = "hi-IN-SwaraNeural", rate: str = "+10%", pitch: str = "+0Hz", timeout_seconds: float = 2.5):
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=False),
             sample_rate=24000,
@@ -89,45 +89,102 @@ class EdgeTTSChunkedStream(tts.ChunkedStream):
             await self._emit_pcm_frames(raw_pcm)
             return
 
-        # 2. Fetch stream from Microsoft Edge-TTS with 3.5s timeout protection (Anti-Freeze)
+        # 2. Fetch and stream from Microsoft Edge-TTS with on-the-fly PyAV decoding
         try:
-            async def _fetch_mp3():
-                communicate = edge_tts.Communicate(
-                    text=self._text,
-                    voice=self._tts.voice,
-                    rate=self._tts.rate,
-                    pitch=self._tts.pitch,
-                )
-                mp3_buffer = io.BytesIO()
+            communicate = edge_tts.Communicate(
+                text=self._text,
+                voice=self._tts.voice,
+                rate=self._tts.rate,
+                pitch=self._tts.pitch,
+            )
+
+            resampler = av.AudioResampler(format="s16", layout="mono", rate=24000)
+            codec = av.CodecContext.create("mp3", "r")
+            cached_pcm_chunks = []
+            chunk_size_bytes = 960  # 480 samples * 2 bytes
+            pcm_buffer = bytearray()
+
+            async def _stream_and_decode():
+                nonlocal pcm_buffer
                 async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        mp3_buffer.write(chunk["data"])
-                return mp3_buffer.getvalue()
+                    if chunk["type"] == "audio" and chunk["data"]:
+                        try:
+                            packets = codec.parse(chunk["data"])
+                            for packet in packets:
+                                for frame in codec.decode(packet):
+                                    for resampled in resampler.resample(frame):
+                                        pcm_data = resampled.to_ndarray().tobytes()
+                                        if pcm_data:
+                                            pcm_buffer.extend(pcm_data)
+                                            cached_pcm_chunks.append(pcm_data)
 
-            mp3_bytes = await asyncio.wait_for(_fetch_mp3(), timeout=3.5)
-            if not mp3_bytes:
-                logger.warning(f"[EdgeTTS] Empty audio returned for: '{self._text[:30]}'")
-                return
+                                            while len(pcm_buffer) >= chunk_size_bytes:
+                                                out_bytes = bytes(pcm_buffer[:chunk_size_bytes])
+                                                del pcm_buffer[:chunk_size_bytes]
 
-            # Zero-subprocess high-speed in-memory decode
-            raw_pcm = decode_mp3_to_pcm_fast(mp3_bytes, target_rate=24000)
-            if not raw_pcm:
-                return
+                                                audio_frame = rtc.AudioFrame(
+                                                    data=out_bytes,
+                                                    sample_rate=24000,
+                                                    num_channels=1,
+                                                    samples_per_channel=480,
+                                                )
+                                                self._event_ch.send_nowait(
+                                                    tts.SynthesizedAudio(
+                                                        request_id=self._request_id,
+                                                        frame=audio_frame,
+                                                    )
+                                                )
+                        except Exception as parse_err:
+                            logger.debug(f"[EdgeTTS] Stream chunk parse note: {parse_err}")
 
-            # Store in cache if under 120 characters (common phrases, greetings, affirmations)
-            if len(self._text) <= 120:
+                # Flush remaining audio
+                try:
+                    for frame in codec.decode():
+                        for resampled in resampler.resample(frame):
+                            pcm_data = resampled.to_ndarray().tobytes()
+                            if pcm_data:
+                                pcm_buffer.extend(pcm_data)
+                                cached_pcm_chunks.append(pcm_data)
+
+                    for resampled in resampler.resample(None):
+                        pcm_data = resampled.to_ndarray().tobytes()
+                        if pcm_data:
+                            pcm_buffer.extend(pcm_data)
+                            cached_pcm_chunks.append(pcm_data)
+
+                    while len(pcm_buffer) > 0:
+                        out_bytes = bytes(pcm_buffer[:chunk_size_bytes])
+                        del pcm_buffer[:chunk_size_bytes]
+                        samples = len(out_bytes) // 2
+                        audio_frame = rtc.AudioFrame(
+                            data=out_bytes,
+                            sample_rate=24000,
+                            num_channels=1,
+                            samples_per_channel=samples,
+                        )
+                        self._event_ch.send_nowait(
+                            tts.SynthesizedAudio(
+                                request_id=self._request_id,
+                                frame=audio_frame,
+                            )
+                        )
+                except Exception:
+                    pass
+
+            await asyncio.wait_for(_stream_and_decode(), timeout=self._tts.timeout_seconds)
+
+            # Store in cache if short phrase
+            if len(self._text) <= 120 and cached_pcm_chunks:
+                full_pcm = b"".join(cached_pcm_chunks)
                 if len(_AUDIO_CACHE) >= _MAX_CACHE_SIZE:
-                    # Evict oldest entry
                     first_k = next(iter(_AUDIO_CACHE))
                     del _AUDIO_CACHE[first_k]
-                _AUDIO_CACHE[cache_key] = raw_pcm
-
-            await self._emit_pcm_frames(raw_pcm)
+                _AUDIO_CACHE[cache_key] = full_pcm
 
         except asyncio.TimeoutError:
-            logger.warning(f"[EdgeTTS] Synthesis timed out after 3.5s for: '{self._text[:35]}'. Bypassing to prevent freeze.")
+            logger.warning(f"[EdgeTTS] Synthesis timed out after {self._tts.timeout_seconds}s for: '{self._text[:35]}'")
         except Exception as e:
-            logger.error(f"[EdgeTTS] Error during synthesis: {e}")
+            logger.error(f"[EdgeTTS] Error during streaming synthesis: {e}")
 
     async def _emit_pcm_frames(self, raw_pcm: bytes):
         chunk_size_samples = 480
