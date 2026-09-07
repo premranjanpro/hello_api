@@ -34,12 +34,13 @@ class LlmOrchestrator:
         self.fallback_model = "llama-3.1-8b-instant"
 
     def get_livekit_llm(self, temperature: float = 0.4):
-        """Creates the optimal LiveKit LLM instance with configured speed settings."""
-        logger.info(f"[Orchestrator] Initializing Voice LLM: {self.active_model} (temp={temperature})")
+        """Creates the optimal LiveKit LLM instance with configured speed settings and bounded tokens."""
+        logger.info(f"[Orchestrator] Initializing Voice LLM: {self.active_model} (temp={temperature}, max_tokens=160)")
         return groq.LLM(
             model=self.active_model,
             temperature=temperature,
             api_key=self.api_key,
+            max_tokens=160,
         )
 
     async def generate_personalized_greeting(
