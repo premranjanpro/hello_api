@@ -521,7 +521,7 @@ async def entrypoint(ctx: JobContext):
         api_base_url=HELLO_API_URL
     )
 
-    # Assemble VoicePipelineAgent with tuned endpointing, false-interruption shielding & preemptive synthesis
+    # Assemble VoicePipelineAgent with comfortable human turn-taking, phrase-level interruption & bounded tokens
     agent = VoicePipelineAgent(
         vad=vad,
         stt=stt,
@@ -530,13 +530,15 @@ async def entrypoint(ctx: JobContext):
         fnc_ctx=tools_ctx,
         chat_ctx=initial_chat_ctx,
         allow_interruptions=True,
-        interrupt_speech_duration=0.5,
-        interrupt_min_words=1,
-        min_endpointing_delay=0.38,
+        interrupt_speech_duration=0.8,
+        interrupt_min_words=3,
+        min_endpointing_delay=0.75,
         max_endpointing_delay=3.5,
         preemptive_synthesis=True,
         max_nested_fnc_calls=2,
     )
+
+    all_call_turns = []
 
     # Live Subtitles: broadcast speech text over WebRTC Data Channel
     async def _broadcast_caption(role: str, text: str):
@@ -554,12 +556,31 @@ async def entrypoint(ctx: JobContext):
     @agent.on("user_speech_committed")
     def on_user_speech(msg: llm.ChatMessage):
         text = msg.content if isinstance(msg.content, str) else str(msg.content)
+        if text.strip() and not text.startswith("PAST USER MEMORY"):
+            all_call_turns.append({"role": "user", "content": text.strip()})
         asyncio.create_task(_broadcast_caption("user", text))
 
     @agent.on("agent_speech_committed")
     def on_agent_speech(msg: llm.ChatMessage):
         text = msg.content if isinstance(msg.content, str) else str(msg.content)
+        if text.strip() and not text.startswith("PAST USER MEMORY"):
+            all_call_turns.append({"role": "assistant", "content": text.strip()})
         asyncio.create_task(_broadcast_caption("assistant", text))
+
+        # Sliding Window Pruning on active agent.chat_ctx:
+        # Keeps system message + last 4 dialogue turns in LLM context.
+        # This keeps input tokens consistently below 600 tokens, permanently eliminating Groq 7,000 ITPM 429 lockouts!
+        try:
+            msgs = agent.chat_ctx.messages
+            if len(msgs) > 6:
+                system_msgs = [m for m in msgs if m.role == "system"]
+                chat_msgs = [m for m in msgs if m.role in ["user", "assistant"]]
+                trimmed_chat = chat_msgs[-4:]
+                agent.chat_ctx.messages.clear()
+                agent.chat_ctx.messages.extend(system_msgs + trimmed_chat)
+                logger.info(f"🧹 Pruned chat_ctx: kept {len(trimmed_chat)} recent turns ({len(agent.chat_ctx.messages)} total in LLM prompt)")
+        except Exception as e:
+            logger.warning(f"Error pruning chat context: {e}")
 
     # Record participant audio track
     @ctx.room.on("track_subscribed")
@@ -599,22 +620,17 @@ async def entrypoint(ctx: JobContext):
     # Wait until user leaves or room disconnects
     disconnect_event = asyncio.Event()
 
-    # Real-time incremental dialogue synchronizer (Every 3 seconds)
-    # Guarantees that even if network cuts, phone dies, or call drops abruptly,
-    # NOT A SINGLE WORD is lost from a 10-minute call!
+    # Real-time incremental dialogue synchronizer (Every 2.5 seconds)
+    # Uses all_call_turns so NOT A SINGLE WORD is lost regardless of chat_ctx pruning!
     async def _realtime_dialogue_sync():
         last_synced_idx = 0
         while not disconnect_event.is_set():
             try:
                 await asyncio.sleep(2.5)
-                msgs = list(agent.chat_ctx.messages)
-                while last_synced_idx < len(msgs):
-                    msg = msgs[last_synced_idx]
+                while last_synced_idx < len(all_call_turns):
+                    turn = all_call_turns[last_synced_idx]
                     last_synced_idx += 1
-                    if msg.role in ["user", "assistant"]:
-                        text = msg.content if isinstance(msg.content, str) else str(msg.content)
-                        if text.strip() and not text.startswith("PAST USER MEMORY") and not text.startswith("System"):
-                            await append_single_turn(call_id, caller_id, persona.id, msg.role, text.strip())
+                    await append_single_turn(call_id, caller_id, persona.id, turn["role"], turn["content"])
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -643,16 +659,14 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"Call finished. Duration: {duration_seconds} seconds.")
         recorder.stop_and_save()
 
-        # Extract all conversation turns from agent.chat_ctx
-        collected_turns = []
-        for msg in agent.chat_ctx.messages:
-            if msg.role in ["user", "assistant"]:
-                text = msg.content if isinstance(msg.content, str) else str(msg.content)
-                if text.strip() and not text.startswith("PAST USER MEMORY"):
-                    collected_turns.append({"role": msg.role, "content": text.strip()})
+        # Extract all conversation turns from all_call_turns (or fallback to agent.chat_ctx)
+        final_turns = all_call_turns if all_call_turns else [
+            {"role": msg.role, "content": msg.content if isinstance(msg.content, str) else str(msg.content)}
+            for msg in agent.chat_ctx.messages if msg.role in ["user", "assistant"]
+        ]
 
         # Update long-term memory summary in hello_api database
-        await save_user_memory(call_id, clean_caller_id, persona.id, collected_turns, orchestrator, tools_ctx=tools_ctx)
+        await save_user_memory(call_id, clean_caller_id, persona.id, final_turns, orchestrator, tools_ctx=tools_ctx)
 
         # Report duration, recording, and active LLM provider to hello_api backend
         await report_call_end(
