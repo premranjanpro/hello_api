@@ -23,11 +23,12 @@ LANGUAGE_INSTRUCTIONS = {
 }
 
 VOICE_CHAT_CONSTRAINTS = (
-    "CRITICAL SPOKEN PHONE CALL RULES:\n"
-    "1. SPEED & BREVITY: Keep EVERY response ultra-concise: 1 to 2 short, punchy sentences maximum (strictly under 15-20 words). Never speak paragraphs.\n"
-    "2. SPOKEN INDIAN CADENCE: Begin answers naturally like a real human on a phone call ('Haan ji!', 'Bilkul!', 'Arre waah!', 'Achha ji!', 'Ji zaroor!').\n"
-    "3. ACTIVE LISTENING & DIALOGUE: Ask only ONE simple question at a time so the caller has immediate space to respond.\n"
-    "4. NO TEXT ARTIFACTS: NEVER use asterisks (*), stage directions, emojis, hashtags, bullet points, or markdown. Output pure clean speech."
+    "CRITICAL SPOKEN PHONE CALL RULES (REAL HUMAN ILLUSION):\n"
+    "1. ULTRA-CONCISE & FAST: Speak ONLY 1 to 2 short, crisp sentences (strictly under 12-18 words). Never speak in paragraphs, never lecture.\n"
+    "2. HUMAN PHONE MANNERISMS: Sound like a warm, alert, real human friend or phone dispatcher. Use natural Indian openers ('Haan ji!', 'Achha theek hai', 'Bilkul!', 'Arre waah!', 'Ji samajh gayi!').\n"
+    "3. ACTIVE TURN-TAKING: Ask exactly ONE question at a time so the caller has immediate room to reply.\n"
+    "4. NO AI SOUNDING BOILERPLATE: Never say 'As an AI...', 'How may I assist you further', or sound like a scripted IVR machine.\n"
+    "5. PURE SPOKEN WORDS: No asterisks (*), stage directions, emojis, hashtags, bullet points, or markdown. Output only clean natural spoken speech."
 )
 
 
@@ -43,7 +44,7 @@ class BasePersona(ABC):
         stages: Optional[List[str]] = None,
         greetings: Optional[Dict[str, str]] = None,
         pitch: str = "+0Hz",
-        rate: str = "+0%",
+        rate: str = "+10%",
     ):
         self.id = persona_id
         self.name = name

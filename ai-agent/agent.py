@@ -515,7 +515,7 @@ async def entrypoint(ctx: JobContext):
         api_base_url=HELLO_API_URL
     )
 
-    # Assemble VoicePipelineAgent with sub-220ms endpointing delay, preemptive synthesis & tools
+    # Assemble VoicePipelineAgent with tuned endpointing, false-interruption shielding & preemptive synthesis
     agent = VoicePipelineAgent(
         vad=vad,
         stt=stt,
@@ -524,8 +524,9 @@ async def entrypoint(ctx: JobContext):
         fnc_ctx=tools_ctx,
         chat_ctx=initial_chat_ctx,
         allow_interruptions=True,
-        interrupt_speech_duration=0.18,
-        min_endpointing_delay=0.22,
+        interrupt_speech_duration=0.35,
+        min_endpointing_delay=0.55,
+        max_endpointing_delay=3.5,
         preemptive_synthesis=True,
         max_nested_fnc_calls=2,
     )

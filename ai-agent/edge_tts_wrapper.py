@@ -45,7 +45,7 @@ class EdgeTTS(tts.TTS):
     Outputs 24kHz / 16-bit mono PCM AudioFrames directly into LiveKit voice pipeline.
     """
 
-    def __init__(self, voice: str = "hi-IN-SwaraNeural", rate: str = "+0%", pitch: str = "+0Hz", timeout_seconds: float = 3.5):
+    def __init__(self, voice: str = "hi-IN-SwaraNeural", rate: str = "+10%", pitch: str = "+0Hz", timeout_seconds: float = 3.5):
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=False),
             sample_rate=24000,
@@ -66,7 +66,7 @@ class EdgeTTS(tts.TTS):
 
 # LRU Audio Cache for ultra-fast replay of common phrases (<1ms)
 _AUDIO_CACHE = {}
-_MAX_CACHE_SIZE = 120
+_MAX_CACHE_SIZE = 150
 
 
 class EdgeTTSChunkedStream(tts.ChunkedStream):
@@ -114,8 +114,8 @@ class EdgeTTSChunkedStream(tts.ChunkedStream):
             if not raw_pcm:
                 return
 
-            # Store in cache if under 100 characters (common phrases, greetings, affirmations)
-            if len(self._text) <= 100:
+            # Store in cache if under 120 characters (common phrases, greetings, affirmations)
+            if len(self._text) <= 120:
                 if len(_AUDIO_CACHE) >= _MAX_CACHE_SIZE:
                     # Evict oldest entry
                     first_k = next(iter(_AUDIO_CACHE))
@@ -152,4 +152,3 @@ class EdgeTTSChunkedStream(tts.ChunkedStream):
                 )
             )
             offset += chunk_size_bytes
-            await asyncio.sleep(0.001)
