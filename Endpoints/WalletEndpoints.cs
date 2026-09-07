@@ -12,7 +12,12 @@ public static class WalletEndpoints
         app.MapGet("/api/wallet", async (ClaimsPrincipal cp, IDbConnection db) =>
         {
             var uid = CurrentUser.Id(cp);
-            var wallet = await db.QueryFirstAsync("SELECT w.id, w.user_id, w.currency, w.created_at, w.updated_at, COALESCE((SELECT SUM(amount) FROM wallet_transaction WHERE user_id=w.user_id), 0) AS balance FROM wallet_account w WHERE w.user_id=@uid", new { uid });
+            var wallet = await db.QueryFirstOrDefaultAsync<dynamic>("SELECT w.id, w.user_id, w.currency, w.created_at, w.updated_at, w.balance FROM wallet_account w WHERE w.user_id=@uid", new { uid });
+            if (wallet == null)
+            {
+                await db.ExecuteAsync("INSERT INTO wallet_account (user_id, balance, hold_balance) VALUES (@uid, 0, 0) ON CONFLICT (user_id) DO NOTHING", new { uid });
+                wallet = await db.QueryFirstOrDefaultAsync<dynamic>("SELECT w.id, w.user_id, w.currency, w.created_at, w.updated_at, w.balance FROM wallet_account w WHERE w.user_id=@uid", new { uid });
+            }
             var txns = await db.QueryAsync("SELECT * FROM wallet_transaction WHERE user_id=@uid ORDER BY created_at DESC LIMIT 50", new { uid });
             return Results.Ok(new { wallet, transactions = txns });
         }).RequireAuthorization();

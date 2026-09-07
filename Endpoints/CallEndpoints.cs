@@ -229,7 +229,52 @@ public static class CallEndpoints
         app.MapGet("/api/calls/history", async (ClaimsPrincipal cp, IDbConnection db) =>
         {
             var uid = CurrentUser.Id(cp);
-            var rows = await db.QueryAsync("SELECT c.*,cu.username AS caller_username,hu.username AS host_username FROM call_session c JOIN app_user cu ON cu.id=c.caller_user_id JOIN app_user hu ON hu.id=c.host_user_id WHERE c.caller_user_id=@uid OR c.host_user_id=@uid ORDER BY c.created_at DESC LIMIT 100", new { uid });
+            var rows = await db.QueryAsync<dynamic>(@"
+                SELECT 
+                    c.id,
+                    c.caller_user_id,
+                    c.host_user_id,
+                    c.room_name,
+                    c.status,
+                    c.rate_per_minute,
+                    c.started_at,
+                    c.connected_at,
+                    c.ended_at,
+                    c.billable_seconds,
+                    c.total_amount,
+                    c.end_reason,
+                    c.call_type,
+                    c.created_at,
+                    COALESCE(ROUND(EXTRACT(EPOCH FROM (COALESCE(c.ended_at, now()) - COALESCE(c.started_at, c.created_at)))), 0) AS duration_seconds,
+                    cu.username AS caller_username,
+                    cu.phone AS caller_phone,
+                    CASE WHEN cu.profile_icon IN ('neutral_voice', 'admin_shield') OR cu.profile_icon IS NULL OR cu.profile_icon = '' THEN (CASE WHEN cu.role = 'admin' THEN '🛡️' WHEN cu.display_gender = 'female' THEN '👩' WHEN cu.display_gender = 'male' THEN '👨' ELSE '👤' END) ELSE cu.profile_icon END AS caller_icon,
+                    hu.username AS host_username,
+                    hu.phone AS host_phone,
+                    CASE WHEN hu.profile_icon IN ('neutral_voice', 'admin_shield') OR hu.profile_icon IS NULL OR hu.profile_icon = '' THEN (CASE WHEN hu.role = 'admin' THEN '🛡️' WHEN hu.display_gender = 'female' THEN '👩' WHEN hu.display_gender = 'male' THEN '👨' ELSE '👤' END) ELSE hu.profile_icon END AS host_icon,
+                    (c.caller_user_id = @uid) AS is_caller,
+                    CASE 
+                        WHEN c.caller_user_id = @uid THEN hu.username 
+                        ELSE cu.username 
+                    END AS other_party_name,
+                    CASE 
+                        WHEN c.caller_user_id = @uid THEN hu.phone 
+                        ELSE cu.phone 
+                    END AS other_party_phone,
+                    CASE 
+                        WHEN c.caller_user_id = @uid THEN (CASE WHEN hu.profile_icon IN ('neutral_voice', 'admin_shield') OR hu.profile_icon IS NULL OR hu.profile_icon = '' THEN (CASE WHEN hu.role = 'admin' THEN '🛡️' WHEN hu.display_gender = 'female' THEN '👩' WHEN hu.display_gender = 'male' THEN '👨' ELSE '👤' END) ELSE hu.profile_icon END)
+                        ELSE (CASE WHEN cu.profile_icon IN ('neutral_voice', 'admin_shield') OR cu.profile_icon IS NULL OR cu.profile_icon = '' THEN (CASE WHEN cu.role = 'admin' THEN '🛡️' WHEN cu.display_gender = 'female' THEN '👩' WHEN cu.display_gender = 'male' THEN '👨' ELSE '👤' END) ELSE cu.profile_icon END)
+                    END AS other_party_icon,
+                    CASE 
+                        WHEN c.caller_user_id = @uid THEN c.host_user_id 
+                        ELSE c.caller_user_id 
+                    END AS other_party_user_id
+                FROM call_session c 
+                JOIN app_user cu ON cu.id=c.caller_user_id 
+                JOIN app_user hu ON hu.id=c.host_user_id 
+                WHERE c.caller_user_id=@uid OR c.host_user_id=@uid 
+                ORDER BY c.created_at DESC 
+                LIMIT 100", new { uid });
             return Results.Ok(rows);
         }).RequireAuthorization();
 

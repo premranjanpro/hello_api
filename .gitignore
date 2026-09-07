@@ -6,3 +6,10 @@ appsettings.Development.json
 *.suo
 *.userosscache
 *.sln.docstates
+
+# Python AI Voice Agent
+ai-agent/venv/
+ai-agent/**/__pycache__/
+ai-agent/**/*.pyc
+ai-agent/.env
+ai-agent/recordings/*.wav

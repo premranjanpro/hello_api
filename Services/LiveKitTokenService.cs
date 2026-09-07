@@ -10,6 +10,11 @@ public class LiveKitTokenService
 {
     public string CreateToken(string apiKey, string apiSecret, string room, string identity, bool canPublish = true, bool canSubscribe = true)
     {
+        return CreateToken(apiKey, apiSecret, room, identity, null, canPublish, canSubscribe);
+    }
+
+    public string CreateToken(string apiKey, string apiSecret, string room, string identity, string? metadataJson, bool canPublish = true, bool canSubscribe = true)
+    {
         var now = DateTime.UtcNow;
         var expiresAt = now.AddHours(2);
         var payload = new Dictionary<string, object?>
@@ -27,6 +32,11 @@ public class LiveKitTokenService
                 canPublishData = true
             }
         };
+
+        if (!string.IsNullOrWhiteSpace(metadataJson))
+        {
+            payload["metadata"] = metadataJson;
+        }
 
         return CreateHs256Jwt(payload, apiSecret);
     }

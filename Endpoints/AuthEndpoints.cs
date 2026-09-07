@@ -73,7 +73,7 @@ public static class AuthEndpoints
                 {
                     bonus = parsedBonus;
                 }
-                user = await db.QueryFirstAsync<AppUser>("INSERT INTO app_user(phone,last_login_at) VALUES(@Phone,now()) RETURNING id,phone,username,dob,display_name AS DisplayName,display_gender AS DisplayGender,role,status,is_host AS IsHost,is_host_approved AS IsHostApproved", new { dto.Phone });
+                user = await db.QueryFirstAsync<AppUser>("INSERT INTO app_user(phone,profile_icon,last_login_at) VALUES(@Phone,'👤',now()) RETURNING id,phone,username,dob,display_name AS DisplayName,display_gender AS DisplayGender,role,status,is_host AS IsHost,is_host_approved AS IsHostApproved", new { dto.Phone });
                 await db.ExecuteAsync("INSERT INTO wallet_account(user_id, balance) VALUES(@UserId, @Balance)", new { UserId = user.Id, Balance = bonus });
                 if (bonus > 0)
                 {

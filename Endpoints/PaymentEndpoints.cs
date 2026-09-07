@@ -1,4 +1,5 @@
 using System.Data;
+using System.Security.Claims;
 using Dapper;
 using PruvaVoice.Api.Models;
 using PruvaVoice.Api.Services;
@@ -9,6 +10,34 @@ public static class PaymentEndpoints
 {
     public static void MapPaymentEndpoints(this WebApplication app)
     {
+        // Dynamic payment methods endpoint for mobile app
+        // Checks active UPI configs & Payment Gateways in database
+        app.MapGet("/api/payments/methods", async (IDbConnection db) =>
+        {
+            var upiRows = await db.QueryAsync<dynamic>(@"
+                SELECT id, provider_name, display_name, config_json, priority 
+                FROM integration_credential 
+                WHERE provider_type = 'upi' AND is_active = true 
+                ORDER BY priority ASC, created_at ASC");
+
+            var gatewayRows = await db.QueryAsync<dynamic>(@"
+                SELECT id, provider_name, display_name, priority 
+                FROM integration_credential 
+                WHERE provider_type = 'payment' AND is_active = true 
+                ORDER BY priority ASC, created_at ASC");
+
+            bool isUpiActive = upiRows.Any();
+            bool isGatewayActive = gatewayRows.Any();
+
+            return Results.Ok(new
+            {
+                upi_active = isUpiActive,
+                gateway_active = isGatewayActive,
+                active_upi_accounts = upiRows,
+                active_gateways = gatewayRows
+            });
+        });
+
         app.MapPost("/api/payments/order", async (CreatePaymentOrderDto dto, ClaimsPrincipal cp, IDbConnection db) =>
         {
             var uid = CurrentUser.Id(cp);

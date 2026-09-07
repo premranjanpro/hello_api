@@ -38,7 +38,11 @@ public static class UserEndpoints
             if (!string.Equals(old, dto.Username, StringComparison.OrdinalIgnoreCase))
                 await db.ExecuteAsync("INSERT INTO username_history(user_id,old_username,new_username) VALUES(@uid,@old,@New)", new { uid, old, New = dto.Username });
 
-            await db.ExecuteAsync("UPDATE app_user SET username=@Username, display_name=@DisplayName, display_gender=@DisplayGender, profile_icon=@ProfileIcon, updated_at=now() WHERE id=@uid", new { dto.Username, dto.DisplayName, dto.DisplayGender, dto.ProfileIcon, uid });
+            var cleanIcon = !string.IsNullOrWhiteSpace(dto.ProfileIcon) && dto.ProfileIcon != "neutral_voice" && dto.ProfileIcon != "admin_shield" && dto.ProfileIcon.Length <= 4
+                ? dto.ProfileIcon
+                : (dto.DisplayGender == "female" ? "👩" : (dto.DisplayGender == "male" ? "👨" : "👤"));
+
+            await db.ExecuteAsync("UPDATE app_user SET username=@Username, display_name=@DisplayName, display_gender=@DisplayGender, profile_icon=@cleanIcon, updated_at=now() WHERE id=@uid", new { dto.Username, dto.DisplayName, dto.DisplayGender, cleanIcon, uid });
             return Results.Ok(new { message = "Profile updated" });
         }).RequireAuthorization();
 
