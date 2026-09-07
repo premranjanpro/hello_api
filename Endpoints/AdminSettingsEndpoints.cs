@@ -32,21 +32,56 @@ public static class AdminSettingsEndpoints
                 WHERE (@type IS NULL OR provider_type = @type)
                 ORDER BY provider_type, priority ASC, created_at ASC";
             var rows = await db.QueryAsync(sql, new { type });
-            return Results.Ok(rows);
+            var result = rows.Select(r =>
+            {
+                object parsed = new { };
+                string raw = (string)r.config_json ?? "{}";
+                try { parsed = JsonSerializer.Deserialize<JsonElement>(raw); } catch { }
+
+                return new
+                {
+                    id = (Guid)r.id,
+                    provider_type = (string)r.provider_type,
+                    provider_name = (string)r.provider_name,
+                    display_name = (string)r.display_name,
+                    config_json = parsed,
+                    priority = (int)(r.priority ?? 1),
+                    is_active = (bool)(r.is_active ?? false),
+                    created_at = r.created_at,
+                    updated_at = r.updated_at
+                };
+            });
+            return Results.Ok(result);
         });
 
         // Get active credentials by type with RAM Caching (Zero-latency)
         app.MapGet("/api/admin/integrations/active/{type}", async (string type, IDbConnection db, IMemoryCache cache) =>
         {
             string cacheKey = $"{ActiveCredentialsCacheKey}_{type}";
-            if (!cache.TryGetValue(cacheKey, out IEnumerable<dynamic>? activeList))
+            if (!cache.TryGetValue(cacheKey, out IEnumerable<object>? activeList))
             {
                 var sql = @"
                     SELECT id, provider_type, provider_name, display_name, config_json, priority, is_active
                     FROM integration_credential 
                     WHERE provider_type = @type AND is_active = true
                     ORDER BY priority ASC, created_at ASC";
-                activeList = await db.QueryAsync(sql, new { type });
+                var rows = await db.QueryAsync(sql, new { type });
+                activeList = rows.Select(r =>
+                {
+                    object parsed = new { };
+                    string raw = (string)r.config_json ?? "{}";
+                    try { parsed = JsonSerializer.Deserialize<JsonElement>(raw); } catch { }
+                    return new
+                    {
+                        id = (Guid)r.id,
+                        provider_type = (string)r.provider_type,
+                        provider_name = (string)r.provider_name,
+                        display_name = (string)r.display_name,
+                        config_json = parsed,
+                        priority = (int)(r.priority ?? 1),
+                        is_active = (bool)(r.is_active ?? false)
+                    };
+                }).ToList();
                 cache.Set(cacheKey, activeList, TimeSpan.FromMinutes(10));
             }
             return Results.Ok(activeList);
