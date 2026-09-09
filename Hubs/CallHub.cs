@@ -77,4 +77,53 @@ public class CallHub(IServiceScopeFactory scopeFactory) : Hub
     {
         await Clients.Caller.SendAsync("callRejectedAck", new { callId });
     }
+
+    public async Task SendDirectMessage(string recipientUserId, string text, string? messageType = "text")
+    {
+        var senderId = Context.UserIdentifier ?? Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(senderId)) return;
+
+        var payload = new
+        {
+            senderId,
+            recipientUserId,
+            text,
+            messageType = messageType ?? "text",
+            timestamp = DateTime.UtcNow
+        };
+
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<IDbConnection>();
+            await db.ExecuteAsync(@"
+                CREATE TABLE IF NOT EXISTS user_chat_message (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    sender_id UUID NOT NULL,
+                    recipient_id UUID NOT NULL,
+                    text TEXT NOT NULL,
+                    message_type VARCHAR(50) DEFAULT 'text',
+                    is_read BOOLEAN DEFAULT false,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                INSERT INTO user_chat_message(sender_id, recipient_id, text, message_type)
+                VALUES(CAST(@senderId AS uuid), CAST(@recipientUserId AS uuid), @text, @messageType);
+            ", new { senderId, recipientUserId, text, messageType });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[CallHub] Error saving direct chat message: {ex.Message}");
+        }
+
+        await Clients.Group($"user:{recipientUserId}").SendAsync("receiveDirectMessage", payload);
+        await Clients.Caller.SendAsync("directMessageSent", payload);
+    }
+
+    public async Task SendTypingIndicator(string recipientUserId, bool isTyping)
+    {
+        var senderId = Context.UserIdentifier ?? Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(senderId)) return;
+        await Clients.Group($"user:{recipientUserId}").SendAsync("userTyping", new { senderId, isTyping });
+    }
 }
+

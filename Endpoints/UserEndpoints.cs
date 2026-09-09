@@ -42,7 +42,18 @@ public static class UserEndpoints
                 ? dto.ProfileIcon
                 : (dto.DisplayGender == "female" ? "👩" : (dto.DisplayGender == "male" ? "👨" : "👤"));
 
-            await db.ExecuteAsync("UPDATE app_user SET username=@Username, display_name=@DisplayName, display_gender=@DisplayGender, profile_icon=@cleanIcon, updated_at=now() WHERE id=@uid", new { dto.Username, dto.DisplayName, dto.DisplayGender, cleanIcon, uid });
+            await db.ExecuteAsync(@"
+                UPDATE app_user 
+                SET username=@Username, 
+                    display_name=@DisplayName, 
+                    display_gender=@DisplayGender, 
+                    profile_icon=@cleanIcon, 
+                    age=COALESCE(@Age, age), 
+                    city=COALESCE(@City, city), 
+                    languages=COALESCE(@Languages, languages), 
+                    updated_at=now() 
+                WHERE id=@uid", 
+                new { dto.Username, dto.DisplayName, dto.DisplayGender, cleanIcon, dto.Age, dto.City, dto.Languages, uid });
             return Results.Ok(new { message = "Profile updated" });
         }).RequireAuthorization();
 
@@ -60,12 +71,22 @@ public static class UserEndpoints
             return Results.Ok(new { message = "Terms accepted" });
         }).RequireAuthorization();
 
-        
         app.MapPost("/api/users/onboarding", async (OnboardingDto dto, ClaimsPrincipal cp, IDbConnection db) =>
         {
             var uid = CurrentUser.Id(cp);
             if (!dto.Is18PlusConfirmed) return Results.BadRequest("18+ confirmation required");
-            await db.ExecuteAsync("UPDATE app_user SET display_gender=@DisplayGender,dob=@Dob,is_18_plus_confirmed=@Is18PlusConfirmed,preferred_language=@PreferredLanguage,updated_at=now() WHERE id=@uid", new { uid, dto.DisplayGender, dto.Dob, dto.Is18PlusConfirmed, dto.PreferredLanguage });
+            await db.ExecuteAsync(@"
+                UPDATE app_user 
+                SET display_gender=@DisplayGender,
+                    dob=@Dob,
+                    is_18_plus_confirmed=@Is18PlusConfirmed,
+                    preferred_language=@PreferredLanguage,
+                    age=COALESCE(@Age, age),
+                    city=COALESCE(@City, city),
+                    languages=COALESCE(@Languages, languages),
+                    updated_at=now() 
+                WHERE id=@uid", 
+                new { uid, dto.DisplayGender, dto.Dob, dto.Is18PlusConfirmed, dto.PreferredLanguage, dto.Age, dto.City, dto.Languages });
             return Results.Ok(new { message = "Onboarding saved" });
         }).RequireAuthorization();
 

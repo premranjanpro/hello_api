@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Voice Agent - Live WebRTC Tester</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <!-- LiveKit Client SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.6.2/dist/livekit-client.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(18, 24, 38, 0.85);
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --accent: #ec4899;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --success: #10b981;
+      --danger: #ef4444;
+      --border: rgba(255, 255, 255, 0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Outfit', sans-serif; }
+    body {
+      background: radial-gradient(circle at top, #1e1b4b, var(--bg));
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      width: 100%;
+      max-width: 520px;
+      padding: 32px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.1) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    h1 { font-size: 26px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.5px; }
+    p.subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; }
+    
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 9999px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 24px;
+      color: var(--text-muted);
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: all 0.3s;
+    }
+    .status-badge.connected .status-dot { background: var(--success); box-shadow: 0 0 10px var(--success); }
+    .status-badge.connecting .status-dot { background: #f59e0b; animation: pulse 1.5s infinite; }
+    
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.4); opacity: 0.5; }
+    }
+
+    .select-group {
+      text-align: left;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    select {
+      width: 100%;
+      padding: 12px 16px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      font-size: 15px;
+      outline: none;
+      transition: border 0.2s;
+    }
+    select:focus { border-color: var(--primary); }
+
+    .avatar-wrap {
+      position: relative;
+      width: 140px;
+      height: 140px;
+      margin: 10px auto 25px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .avatar-glow {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      opacity: 0.2;
+      transition: all 0.4s;
+    }
+    .avatar-wrap.active .avatar-glow {
+      opacity: 0.8;
+      animation: ripple 2s infinite ease-out;
+    }
+    @keyframes ripple {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      100% { transform: scale(1.4); opacity: 0; }
+    }
+    .avatar {
+      position: relative;
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      background: #1f2937;
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 48px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: all 0.2s;
+    }
+    .btn-call {
+      background: linear-gradient(135deg, var(--primary), #4338ca);
+      color: #fff;
+      box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.5);
+    }
+    .btn-call:hover { transform: translateY(-2px); box-shadow: 0 14px 25px -5px rgba(99, 102, 241, 0.6); }
+    .btn-end {
+      background: linear-gradient(135deg, var(--danger), #b91c1c);
+      color: #fff;
+      box-shadow: 0 10px 20px -5px rgba(239, 68, 68, 0.5);
+    }
+    .btn-end:hover { transform: translateY(-2px); box-shadow: 0 14px 25px -5px rgba(239, 68, 68, 0.6); }
+
+    .transcript-box {
+      margin-top: 24px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      text-align: left;
+      min-height: 80px;
+      max-height: 160px;
+      overflow-y: auto;
+      font-size: 13px;
+    }
+    .msg { margin-bottom: 8px; line-height: 1.4; }
+    .msg-user { color: #93c5fd; }
+    .msg-ai { color: #f472b6; }
+    .msg-sys { color: var(--text-muted); font-style: italic; }
+
+    footer {
+      margin-top: 24px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>AI Voice Agent Tester</h1>
+    <p class="subtitle">Real-time WebRTC Voice Call with Groq + Neural TTS</p>
+
+    <div class="status-badge" id="statusBadge">
+      <div class="status-dot"></div>
+      <span id="statusText">Ready to Call</span>
+    </div>
+
+    <div class="select-group" id="settingsArea">
+      <label for="personaSelect">Choose AI Persona:</label>
+      <select id="personaSelect">
+        <option value="kids_learning">🧸 Kids Learning (Puruva AI / A-to-Z)</option>
+        <option value="cab_booking">🚖 Cab Booking Assistant</option>
+        <option value="hr_interview">💼 HR Interviewer</option>
+        <option value="parents_care">👵 Parents Care & Health Companion</option>
+        <option value="english_tutor">🎓 English Speaking Tutor</option>
+        <option value="romantic_chat">💖 Romantic Casual Chat</option>
+      </select>
+    </div>
+
+    <div class="avatar-wrap" id="avatarWrap">
+      <div class="avatar-glow"></div>
+      <div class="avatar" id="avatarIcon">🧸</div>
+    </div>
+
+    <div id="controls">
+      <button class="btn btn-call" id="callBtn" onclick="toggleCall()">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
+        Start Voice Call
+      </button>
+    </div>
+
+    <div class="transcript-box" id="transcriptBox">
+      <div class="msg msg-sys">Select a persona and click 'Start Voice Call' to speak via microphone.</div>
+    </div>
+  </div>
+
+  <footer>
+    LiveKit: ws://localhost:7880 &bull; Backend: http://localhost:5063 &bull; AI Agent: Active
+  </footer>
+
+  <script>
+    let room = null;
+    let inCall = false;
+
+    const personaIcons = {
+      kids_learning: '🧸',
+      cab_booking: '🚖',
+      hr_interview: '💼',
+      parents_care: '👵',
+      english_tutor: '🎓',
+      romantic_chat: '💖'
+    };
+
+    document.getElementById('personaSelect').addEventListener('change', (e) => {
+      document.getElementById('avatarIcon').innerText = personaIcons[e.target.value] || '🤖';
+    });
+
+    function addLog(text, type = 'sys') {
+      const box = document.getElementById('transcriptBox');
+      const div = document.createElement('div');
+      div.className = `msg msg-${type}`;
+      div.innerText = text;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function setStatus(text, state = '') {
+      const badge = document.getElementById('statusBadge');
+      const statusText = document.getElementById('statusText');
+      badge.className = `status-badge ${state}`;
+      statusText.innerText = text;
+    }
+
+    async function toggleCall() {
+      if (inCall) {
+        endCall();
+      } else {
+        startCall();
+      }
+    }
+
+    async function startCall() {
+      const persona = document.getElementById('personaSelect').value;
+      const btn = document.getElementById('callBtn');
+      btn.disabled = true;
+      setStatus('Requesting Call Token...', 'connecting');
+      addLog(`Requesting token for ${persona}...`, 'sys');
+
+      try {
+        // 1. Call hello_api backend to generate LiveKit room & token
+        const resp = await fetch('/api/admin/ai/calls/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ personaId: persona, language: 'hinglish' })
+        });
+
+        if (!resp.ok) {
+          throw new Error(`Backend error: ${resp.status} ${await resp.text()}`);
+        }
+
+        const data = await resp.json();
+        const { token, liveKitUrl, roomName } = data;
+        addLog(`Connected to room: ${roomName}`, 'sys');
+
+        // 2. Connect to LiveKit WebRTC server
+        setStatus('Connecting WebRTC Audio...', 'connecting');
+        room = new LivekitClient.Room({
+          adaptiveStream: true,
+          dynacast: true,
+        });
+
+        // Track incoming audio from AI agent
+        room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+          if (track.kind === LivekitClient.Track.Kind.Audio) {
+            addLog(`🤖 [AI Agent Connected] Audio streaming started.`, 'ai');
+            const audioElement = track.attach();
+            document.body.appendChild(audioElement);
+            document.getElementById('avatarWrap').classList.add('active');
+            setStatus('Call Active (Speak now)', 'connected');
+          }
+        });
+
+        // Listen for data packets (captions, transcriptions, interactive cards)
+        room.on(LivekitClient.RoomEvent.DataReceived, (payload, participant) => {
+          try {
+            const str = new TextDecoder().decode(payload);
+            const evt = JSON.parse(str);
+            if (evt.type === 'transcript' || evt.event === 'caption') {
+              addLog(`${evt.sender || 'AI'}: ${evt.text}`, evt.sender === 'user' ? 'user' : 'ai');
+            } else if (evt.type === 'interactive_sheet' || evt.component) {
+              const comp = evt.component || evt.type;
+              if (comp === 'painting_canvas') {
+                addLog(`🎨 [Interactive Sheet: Painting Canvas] ${evt.title} - ${evt.subtitle}`, 'ai');
+              } else if (comp === 'visual_image_quiz') {
+                addLog(`🔍 [Interactive Quiz] ${evt.question} (${(evt.options || []).join(' | ')})`, 'ai');
+              } else if (comp === 'letter_tracing') {
+                addLog(`✍️ [Letter Tracing] Trace '${evt.target_text}'!`, 'ai');
+              } else if (comp === 'story_scene') {
+                addLog(`📖 [Story Scene] ${evt.title}: ${evt.text}`, 'ai');
+              } else {
+                addLog(`📱 [Interactive Card] ${evt.title || comp}`, 'ai');
+              }
+            }
+          } catch(e) {}
+        });
+
+        room.on(LivekitClient.RoomEvent.Disconnected, () => {
+          cleanup();
+        });
+
+        const targetUrl = liveKitUrl || 'ws://localhost:7880';
+        await room.connect(targetUrl, token);
+
+        // 3. Publish Local Microphone to AI agent
+        await room.localParticipant.setMicrophoneEnabled(true);
+        addLog('🎙️ Microphone enabled. Start speaking!', 'sys');
+
+        inCall = true;
+        btn.disabled = false;
+        btn.className = 'btn btn-end';
+        btn.innerHTML = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/></svg> End Call`;
+        setStatus('Call Active (Speak now)', 'connected');
+        document.getElementById('settingsArea').style.display = 'none';
+
+      } catch (err) {
+        console.error(err);
+        addLog(`❌ Connection Error: ${err.message}`, 'sys');
+        setStatus('Failed to connect', '');
+        btn.disabled = false;
+        cleanup();
+      }
+    }
+
+    async function endCall() {
+      if (room) {
+        await room.disconnect();
+      }
+      cleanup();
+    }
+
+    function cleanup() {
+      inCall = false;
+      document.getElementById('avatarWrap').classList.remove('active');
+      document.getElementById('settingsArea').style.display = 'block';
+      const btn = document.getElementById('callBtn');
+      btn.className = 'btn btn-call';
+      btn.innerHTML = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg> Start Voice Call`;
+      setStatus('Call Ended', '');
+      addLog('Call ended.', 'sys');
+    }
+  </script>
+</body>
+</html>

@@ -62,7 +62,7 @@ public static class AuthEndpoints
             if (!BCrypt.Net.BCrypt.Verify(dto.Otp, (string)req.otp_hash)) return Results.BadRequest("Invalid OTP");
             await db.ExecuteAsync("UPDATE otp_request SET verified_at=now() WHERE id=@Id", new { Id = req.id });
 
-            var user = await db.QueryFirstOrDefaultAsync<AppUser>("SELECT id,phone,username,dob,display_name AS DisplayName,display_gender AS DisplayGender,role,status,is_host AS IsHost,is_host_approved AS IsHostApproved FROM app_user WHERE phone=@Phone", new { dto.Phone });
+            var user = await db.QueryFirstOrDefaultAsync<AppUser>("SELECT id,phone,username,dob,display_name AS DisplayName,display_gender AS DisplayGender,role,status,is_host AS IsHost,is_host_approved AS IsHostApproved,referral_code AS ReferralCode,referred_by_user_id AS ReferredByUserId FROM app_user WHERE phone=@Phone", new { dto.Phone });
             bool isNew = false;
             if (user == null)
             {
@@ -73,20 +73,96 @@ public static class AuthEndpoints
                 {
                     bonus = parsedBonus;
                 }
-                user = await db.QueryFirstAsync<AppUser>("INSERT INTO app_user(phone,profile_icon,last_login_at) VALUES(@Phone,'👤',now()) RETURNING id,phone,username,dob,display_name AS DisplayName,display_gender AS DisplayGender,role,status,is_host AS IsHost,is_host_approved AS IsHostApproved", new { dto.Phone });
-                await db.ExecuteAsync("INSERT INTO wallet_account(user_id, balance) VALUES(@UserId, @Balance)", new { UserId = user.Id, Balance = bonus });
+
+                // Check Referral Code
+                Guid? referrerId = null;
+                string? refCode = dto.ReferralCode?.Trim().ToUpperInvariant();
+                decimal referralReward = 10m;
+                if (!string.IsNullOrEmpty(refCode))
+                {
+                    var refUser = await db.QueryFirstOrDefaultAsync<dynamic>("SELECT id, username FROM app_user WHERE UPPER(referral_code) = @refCode", new { refCode });
+                    if (refUser != null)
+                    {
+                        referrerId = (Guid)refUser.id;
+                        var refBonusVal = await db.QueryFirstOrDefaultAsync<string>("SELECT value FROM app_setting WHERE key='referral_bonus_amount'");
+                        if (!string.IsNullOrEmpty(refBonusVal) && decimal.TryParse(refBonusVal, out decimal parsedRefBonus))
+                        {
+                            referralReward = parsedRefBonus;
+                        }
+
+                        var refereeBonusVal = await db.QueryFirstOrDefaultAsync<string>("SELECT value FROM app_setting WHERE key='referred_user_bonus_amount'");
+                        if (!string.IsNullOrEmpty(refereeBonusVal) && decimal.TryParse(refereeBonusVal, out decimal parsedRefereeBonus))
+                        {
+                            bonus += parsedRefereeBonus;
+                        }
+                    }
+                }
+
+                string newRefCode = "REF" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+
+                user = await db.QueryFirstAsync<AppUser>(@"
+                    INSERT INTO app_user(phone, profile_icon, last_login_at, referral_code, referred_by_user_id, assigned_persona_id) 
+                    VALUES(@Phone, '👤', now(), @newRefCode, @referrerId, 'persona_role_kids_learning') 
+                    RETURNING id, phone, username, dob, display_name AS DisplayName, display_gender AS DisplayGender, role, status, is_host AS IsHost, is_host_approved AS IsHostApproved, referral_code AS ReferralCode, referred_by_user_id AS ReferredByUserId", 
+                    new { dto.Phone, newRefCode, referrerId });
+
+                await db.ExecuteAsync("INSERT INTO wallet_account(user_id, balance, currency, updated_at) VALUES(@UserId, @Balance, 'INR', now())", new { UserId = user.Id, Balance = bonus });
                 if (bonus > 0)
                 {
-                    await db.ExecuteAsync("INSERT INTO wallet_transaction(user_id,txn_type,amount,balance_after,note) VALUES(@UserId,'recharge',@Balance,@Balance,'Welcome bonus credit')", new { UserId = user.Id, Balance = bonus });
+                    string note = referrerId.HasValue ? "Welcome bonus & referral sign-up reward" : "Welcome bonus credit";
+                    await db.ExecuteAsync("INSERT INTO wallet_transaction(user_id, txn_type, amount, balance_after, note) VALUES(@UserId, 'recharge', @Balance, @Balance, @note)", new { UserId = user.Id, Balance = bonus, note });
+                }
+
+                // Credit Referrer
+                if (referrerId.HasValue)
+                {
+                    await db.ExecuteAsync(@"
+                        INSERT INTO wallet_account(user_id, balance, currency, updated_at) 
+                        VALUES (@referrerId, @referralReward, 'INR', now()) 
+                        ON CONFLICT (user_id) DO UPDATE SET balance = wallet_account.balance + @referralReward, updated_at = now();
+
+                        INSERT INTO wallet_transaction(user_id, txn_type, amount, note) 
+                        VALUES (@referrerId, 'referral_bonus', @referralReward, 'Referral bonus for inviting new user');
+
+                        INSERT INTO app_user_referral(referrer_user_id, referred_user_id, reward_amount, reward_status)
+                        VALUES (@referrerId, @newUserId, @referralReward, 'credited');
+                    ", new { referrerId = referrerId.Value, referralReward, newUserId = user.Id });
                 }
             }
             else
             {
                 await db.ExecuteAsync("UPDATE app_user SET last_login_at=now() WHERE id=@Id", new { user.Id });
+                if (string.IsNullOrEmpty(user.ReferralCode))
+                {
+                    string genCode = "REF" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+                    await db.ExecuteAsync("UPDATE app_user SET referral_code=@genCode WHERE id=@Id", new { genCode, user.Id });
+                    user.ReferralCode = genCode;
+                }
             }
 
             if (user.Status != "active") return Results.Forbid();
-            return Results.Ok(new { token = jwt.Create(user.Id, user.Phone, user.Role), user, isNew });
+
+            var accBal = await db.ExecuteScalarAsync<decimal?>("SELECT balance FROM wallet_account WHERE user_id=@id", new { id = user.Id }) ?? 0m;
+            var txnBal = await db.ExecuteScalarAsync<decimal?>("SELECT COALESCE(SUM(amount), 0) FROM wallet_transaction WHERE user_id=@id", new { id = user.Id }) ?? 0m;
+            var userBalance = Math.Max(accBal, txnBal);
+
+            var userResponse = new
+            {
+                user.Id,
+                user.Phone,
+                user.Username,
+                user.Dob,
+                DisplayName = user.DisplayName,
+                DisplayGender = user.DisplayGender,
+                Role = user.Role,
+                Status = user.Status,
+                IsHost = user.IsHost,
+                IsHostApproved = user.IsHostApproved,
+                ReferralCode = user.ReferralCode,
+                wallet_balance = userBalance
+            };
+
+            return Results.Ok(new { token = jwt.Create(user.Id, user.Phone, user.Role), user = userResponse, isNew });
         });
     }
 }

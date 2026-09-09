@@ -1,8 +1,10 @@
 namespace PruvaVoice.Api.Models;
 
 public record OtpRequestDto(string Phone);
-public record VerifyOtpDto(string Phone, string Otp);
-public record UpdateProfileDto(string Username, string? DisplayName, string DisplayGender, string ProfileIcon);
+public record VerifyOtpDto(string Phone, string Otp, string? ReferralCode = null);
+public record ApplyReferralDto(string ReferralCode);
+public record AiTextChatDto(string? PersonaId, string Message, Guid? UserId = null);
+public record UpdateProfileDto(string Username, string? DisplayName, string DisplayGender, string ProfileIcon, int? Age = null, string? City = null, string? Languages = null);
 public record AcceptTermsDto(Guid TermsVersionId);
 public record RegisterDeviceDto(string? DeviceId, string FcmToken, string Platform, string? AppVersion);
 public record HostPresenceDto(string Status, DateTimeOffset? ScheduleOnlineAt, DateTimeOffset? ScheduleOfflineAt);
@@ -19,7 +21,7 @@ public record CreatePaymentOrderDto(decimal Amount, string Purpose, string Provi
 public record PaymentWebhookDto(string Provider, string EventId, string Signature, object Payload);
 public record CategoryDto(string Name, string? Description, string? Icon, int SortOrder, bool IsActive);
 
-public record OnboardingDto(string DisplayGender, DateTime Dob, bool Is18PlusConfirmed, string PreferredLanguage);
+public record OnboardingDto(string DisplayGender, DateTime Dob, bool Is18PlusConfirmed, string PreferredLanguage, int? Age = null, string? City = null, string? Languages = null);
 
 public record AdminSendNotificationDto(Guid? UserId, string Title, string Body, string? ImageUrl, Dictionary<string, string>? Data);
 

@@ -21,6 +21,8 @@ public static class AdminEndpoints
         if (lower.Contains("romantic_chat") || lower.Contains("romantic")) return ("Romantic Companion", "💖", "Virtual Companion");
         if (lower.Contains("parents_care")) return ("Parents Care Assistant", "🌿", "Elderly Care");
         if (lower.Contains("english_tutor")) return ("Spoken English Coach", "🗣️", "Language Coach");
+        if (lower.Contains("software_sales") || lower.Contains("sales")) return ("Software Sales Consultant", "🏢", "SaaS Advisor");
+        if (lower.Contains("kids_game") || lower.Contains("game")) return ("Kids Game & Quiz Master", "🎮", "Game Master");
 
         return ("AI Voice Agent", "🤖", "AI Assistant");
     }
@@ -35,7 +37,20 @@ public static class AdminEndpoints
 
         app.MapGet("/api/admin/users", async (IDbConnection db) =>
         {
-            var rows = await db.QueryAsync("SELECT u.*, COALESCE((SELECT SUM(amount) FROM wallet_transaction WHERE user_id = u.id), 0) AS wallet_balance, COALESCE(p.status, 'offline') AS presence FROM app_user u LEFT JOIN wallet_account w ON w.user_id = u.id LEFT JOIN user_presence p ON p.user_id = u.id WHERE u.role <> 'admin' ORDER BY u.created_at DESC LIMIT 500");
+            var rows = await db.QueryAsync(@"
+                SELECT u.*, 
+                       COALESCE(u.assigned_persona_id, 'persona_role_kids_learning') AS assigned_persona_id,
+                       COALESCE((SELECT SUM(amount) FROM wallet_transaction WHERE user_id = u.id), 0) AS wallet_balance, 
+                       COALESCE(p.status, 'offline') AS presence,
+                       ref_u.username AS referred_by_username,
+                       ref_u.phone AS referred_by_phone,
+                       COALESCE((SELECT COUNT(1) FROM app_user_referral WHERE referrer_user_id = u.id), 0) AS referrals_count
+                FROM app_user u 
+                LEFT JOIN wallet_account w ON w.user_id = u.id 
+                LEFT JOIN user_presence p ON p.user_id = u.id 
+                LEFT JOIN app_user ref_u ON ref_u.id = u.referred_by_user_id
+                WHERE u.role <> 'admin' 
+                ORDER BY u.created_at DESC LIMIT 500");
             return Results.Ok(rows);
         });
 
@@ -59,7 +74,14 @@ public static class AdminEndpoints
 
         app.MapPost("/api/admin/users/{userId:guid}/update", async (Guid userId, AdminUpdateUserDto dto, IDbConnection db) =>
         {
-            await db.ExecuteAsync("UPDATE app_user SET username=@Username, phone=@Phone, display_gender=@Gender, display_name=@Username WHERE id=@userId", new { userId, dto.Username, dto.Phone, dto.Gender });
+            await db.ExecuteAsync(@"
+                UPDATE app_user 
+                SET username=@Username, 
+                    phone=@Phone, 
+                    display_gender=@Gender, 
+                    display_name=@Username,
+                    assigned_persona_id=COALESCE(@AssignedPersonaId, assigned_persona_id, 'persona_role_kids_learning')
+                WHERE id=@userId", new { userId, dto.Username, dto.Phone, dto.Gender, dto.AssignedPersonaId });
             var currentBalance = await db.ExecuteScalarAsync<decimal>("SELECT COALESCE(SUM(amount), 0) FROM wallet_transaction WHERE user_id = @userId", new { userId });
             var diff = dto.WalletBalance - currentBalance;
             if (diff != 0)
@@ -68,6 +90,13 @@ public static class AdminEndpoints
             }
             await db.ExecuteAsync("INSERT INTO wallet_account(user_id, balance, currency, updated_at) VALUES(@userId, @WalletBalance, 'INR', now()) ON CONFLICT(user_id) DO UPDATE SET balance=@WalletBalance, updated_at=now();", new { userId, dto.WalletBalance });
             return Results.Ok(new { message = "User details updated successfully" });
+        });
+
+        app.MapPost("/api/admin/users/{userId:guid}/persona", async (Guid userId, AdminSetPersonaDto dto, IDbConnection db) =>
+        {
+            var personaId = string.IsNullOrWhiteSpace(dto.PersonaId) ? "persona_role_kids_learning" : dto.PersonaId;
+            await db.ExecuteAsync("UPDATE app_user SET assigned_persona_id=@personaId WHERE id=@userId", new { userId, personaId });
+            return Results.Ok(new { message = "User persona updated successfully", userId, personaId });
         });
 
 
@@ -140,6 +169,7 @@ public static class AdminEndpoints
                     c.llm_provider,
                     c.llm_model,
                     c.latency_telemetry,
+                    COALESCE(c.telephony_provider, 'livekit') AS telephony_provider,
                     COALESCE(ROUND(EXTRACT(EPOCH FROM (COALESCE(c.ended_at, now()) - COALESCE(c.started_at, c.created_at)))), 0) AS duration_seconds,
                     cu.username AS caller_username,
                     cu.phone AS caller_phone,
@@ -241,6 +271,8 @@ public static class AdminEndpoints
                     ["llm_model"] = r.llm_model,
                     ["latencyTelemetry"] = r.latency_telemetry,
                     ["latency_telemetry"] = r.latency_telemetry,
+                    ["telephonyProvider"] = r.telephony_provider ?? "livekit",
+                    ["telephony_provider"] = r.telephony_provider ?? "livekit",
                     ["recordingFile"] = recordingFile,
                     ["recording_file"] = recordingFile,
                     ["recordingUrl"] = recUrl,
@@ -627,5 +659,6 @@ public record AddNotificationCampaignDto(
     DateTime? ScheduleTime
 );
 
-public record AdminUpdateUserDto(string Username, string Phone, string Gender, decimal WalletBalance);
+public record AdminUpdateUserDto(string Username, string Phone, string Gender, decimal WalletBalance, string? AssignedPersonaId = null);
+public record AdminSetPersonaDto(string PersonaId);
 public record AdminStartUserCallDto(Guid TargetUserId);

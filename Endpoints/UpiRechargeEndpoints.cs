@@ -52,21 +52,69 @@ public static class UpiRechargeEndpoints
                 }
                 else
                 {
-                    var dto = await request.ReadFromJsonAsync<UpiRechargeSubmitDto>();
-                    if (dto != null)
+                    try
                     {
-                        userId = dto.UserId;
-                        amount = dto.Amount;
-                        utrNumber = dto.UtrNumber;
-                        upiId = dto.UpiId ?? "";
-                        businessName = dto.BusinessName ?? "";
-                        receiptImageUrl = dto.ReceiptImageUrl ?? "";
+                        using var jsonDoc = await System.Text.Json.JsonDocument.ParseAsync(request.Body);
+                        var root = jsonDoc.RootElement;
+                        if (root.TryGetProperty("user_id", out var uidProp) || root.TryGetProperty("userId", out uidProp))
+                        {
+                            Guid.TryParse(uidProp.GetString(), out userId);
+                        }
+                        if (root.TryGetProperty("amount", out var amtProp))
+                        {
+                            if (amtProp.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                amount = amtProp.GetDecimal();
+                            else
+                                decimal.TryParse(amtProp.GetString(), out amount);
+                        }
+                        if (root.TryGetProperty("utr_number", out var utrProp) || root.TryGetProperty("utrNumber", out utrProp))
+                        {
+                            utrNumber = utrProp.GetString() ?? "";
+                        }
+                        if (root.TryGetProperty("upi_id", out var upiProp) || root.TryGetProperty("upiId", out upiProp))
+                        {
+                            upiId = upiProp.GetString() ?? "";
+                        }
+                        if (root.TryGetProperty("business_name", out var bizProp) || root.TryGetProperty("businessName", out bizProp))
+                        {
+                            businessName = bizProp.GetString() ?? "";
+                        }
+                        if (root.TryGetProperty("receipt_image_url", out var rcptProp) || root.TryGetProperty("receiptImageUrl", out rcptProp))
+                        {
+                            receiptImageUrl = rcptProp.GetString() ?? "";
+                        }
                     }
+                    catch
+                    {
+                        // Fallback to ReadFromJsonAsync
+                        var dto = await request.ReadFromJsonAsync<UpiRechargeSubmitDto>();
+                        if (dto != null)
+                        {
+                            userId = dto.UserId;
+                            amount = dto.Amount;
+                            utrNumber = dto.UtrNumber;
+                            upiId = dto.UpiId ?? "";
+                            businessName = dto.BusinessName ?? "";
+                            receiptImageUrl = dto.ReceiptImageUrl ?? "";
+                        }
+                    }
+                }
+
+                if (userId == Guid.Empty && request.HttpContext.User?.Identity?.IsAuthenticated == true)
+                {
+                    userId = CurrentUser.Id(request.HttpContext.User);
                 }
 
                 if (userId == Guid.Empty || amount <= 0 || string.IsNullOrWhiteSpace(utrNumber))
                 {
                     return Results.BadRequest(new { message = "Valid user_id, amount, and utr_number are required." });
+                }
+
+                // Verify user exists in app_user to prevent foreign key violation
+                var userExists = await db.ExecuteScalarAsync<int>("SELECT count(1) FROM app_user WHERE id = @userId", new { userId });
+                if (userExists == 0)
+                {
+                    return Results.BadRequest(new { message = "User not found in system. Please log in again." });
                 }
 
                 // Check for duplicate UTR
@@ -85,7 +133,7 @@ public static class UpiRechargeEndpoints
                     ) VALUES (
                         @requestId, @userId, @amount, @utrNumber, @receiptImageUrl, @upiId, @businessName, 'pending', now(), now()
                     )",
-                    new { requestId, userId, amount, utrNumber, receiptImageUrl, upiId, businessName });
+                    new { requestId, userId, amount, utrNumber, receiptImageUrl = receiptImageUrl ?? "", upiId, businessName });
 
                 return Results.Ok(new
                 {

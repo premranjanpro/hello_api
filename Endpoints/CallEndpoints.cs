@@ -245,17 +245,23 @@ public static class CallEndpoints
                     c.end_reason,
                     c.call_type,
                     c.created_at,
-                    COALESCE(ROUND(EXTRACT(EPOCH FROM (COALESCE(c.ended_at, now()) - COALESCE(c.started_at, c.created_at)))), 0) AS duration_seconds,
-                    cu.username AS caller_username,
+                    CASE 
+                        WHEN c.billable_seconds > 0 THEN c.billable_seconds
+                        WHEN c.ended_at IS NOT NULL AND c.started_at IS NOT NULL THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (c.ended_at - c.started_at))))
+                        WHEN c.ended_at IS NOT NULL AND c.created_at IS NOT NULL THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (c.ended_at - c.created_at))))
+                        WHEN c.status = 'connected' AND c.connected_at IS NOT NULL THEN GREATEST(0, ROUND(EXTRACT(EPOCH FROM (now() - c.connected_at))))
+                        ELSE 0
+                    END AS duration_seconds,
+                    COALESCE(NULLIF(cu.display_name, ''), cu.username, cu.phone, 'User') AS caller_username,
                     cu.phone AS caller_phone,
                     CASE WHEN cu.profile_icon IN ('neutral_voice', 'admin_shield') OR cu.profile_icon IS NULL OR cu.profile_icon = '' THEN (CASE WHEN cu.role = 'admin' THEN '🛡️' WHEN cu.display_gender = 'female' THEN '👩' WHEN cu.display_gender = 'male' THEN '👨' ELSE '👤' END) ELSE cu.profile_icon END AS caller_icon,
-                    hu.username AS host_username,
+                    COALESCE(NULLIF(hu.display_name, ''), hu.username, hu.phone, 'User') AS host_username,
                     hu.phone AS host_phone,
                     CASE WHEN hu.profile_icon IN ('neutral_voice', 'admin_shield') OR hu.profile_icon IS NULL OR hu.profile_icon = '' THEN (CASE WHEN hu.role = 'admin' THEN '🛡️' WHEN hu.display_gender = 'female' THEN '👩' WHEN hu.display_gender = 'male' THEN '👨' ELSE '👤' END) ELSE hu.profile_icon END AS host_icon,
                     (c.caller_user_id = @uid) AS is_caller,
                     CASE 
-                        WHEN c.caller_user_id = @uid THEN hu.username 
-                        ELSE cu.username 
+                        WHEN c.caller_user_id = @uid THEN COALESCE(NULLIF(hu.display_name, ''), hu.username, hu.phone, 'User')
+                        ELSE COALESCE(NULLIF(cu.display_name, ''), cu.username, cu.phone, 'User')
                     END AS other_party_name,
                     CASE 
                         WHEN c.caller_user_id = @uid THEN hu.phone 
@@ -272,7 +278,11 @@ public static class CallEndpoints
                 FROM call_session c 
                 JOIN app_user cu ON cu.id=c.caller_user_id 
                 JOIN app_user hu ON hu.id=c.host_user_id 
-                WHERE c.caller_user_id=@uid OR c.host_user_id=@uid 
+                WHERE (c.caller_user_id=@uid OR c.host_user_id=@uid)
+                  AND c.caller_user_id != c.host_user_id
+                  AND COALESCE(c.call_type, '') NOT IN ('ai', 'ai_call', 'task_call', 'outbound_ai')
+                  AND COALESCE(c.is_outbound_ai, FALSE) = FALSE
+                  AND NOT (COALESCE(c.room_name, '') LIKE 'ai_%' OR COALESCE(c.room_name, '') LIKE 'task_%')
                 ORDER BY c.created_at DESC 
                 LIMIT 100", new { uid });
             return Results.Ok(rows);

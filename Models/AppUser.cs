@@ -12,4 +12,6 @@ public class AppUser
     public bool IsHost { get; set; }
     public bool IsHostApproved { get; set; }
     public DateTime? Dob { get; set; }
+    public string? ReferralCode { get; set; }
+    public Guid? ReferredByUserId { get; set; }
 }

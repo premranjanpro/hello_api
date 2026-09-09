@@ -11,5 +11,8 @@ appsettings.Development.json
 ai-agent/venv/
 ai-agent/**/__pycache__/
 ai-agent/**/*.pyc
-ai-agent/.env
 ai-agent/recordings/*.wav
+recordings/
+*.wav
+*.env
+.env
